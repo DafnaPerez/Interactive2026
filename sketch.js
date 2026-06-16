@@ -626,7 +626,7 @@ function platformGetLoadingStartIndex() {
 
 function platformGetLoadingTriangleRefPts(index) {
   let animal = platformAnimals[index];
-  return animal.pts.map((p) => [mx(p[0]), platformTuckRefY(p[1]) + INTRO_TRIANGLES_OFFSET_Y]);
+  return animal.pts.map((p) => [mx(p[0]), my(p[1]) + INTRO_TRIANGLES_OFFSET_Y]);
 }
 
 function platformSortTriangleVerts(pts) {
@@ -712,7 +712,7 @@ function platformDrawLoadingTriangle(morph, breathe = 0) {
       ? 1 + sin((morph.segmentT / PLATFORM_LOADING_HOLD_MS) * TWO_PI) * 0.018
       : 1;
   let morphLift = sin(morph.morphT * PI) * 0.035;
-  let scale = holdPulse + morphLift + breathe;
+  let triScale = holdPulse + morphLift + breathe;
 
   let cx = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
   let cy = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
@@ -723,7 +723,7 @@ function platformDrawLoadingTriangle(morph, breathe = 0) {
 
   push();
   translate(cx, cy);
-  scale(scale);
+  scale(triScale);
   translate(-cx, -cy);
   fill(triColor);
   triangle(
@@ -787,7 +787,7 @@ function platformDrawLoading() {
     platformText.loadingHint.text,
     platformText.loadingHint.x,
     platformText.loadingHint.y,
-    platformW - POSTER_LAYOUT.marginX * 2
+    platformW - mx(34) * 2
   );
 }
 
