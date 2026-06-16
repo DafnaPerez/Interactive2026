@@ -4334,7 +4334,9 @@ function platformGetChoiceImageVisualOffset(img) {
 
 const platformChoiceImageTweaks = {
   plasticBag: { maxSizeScale: 0.9 },
-  fabricBag: { maxSizeScale: 0.9, offsetY: -1 },
+  fabricBag: { maxSizeScale: 0.9, offsetY: 0 },
+  plasticBottle: { maxSizeScale: 0.9 },
+  reusableBottle: { maxSizeScale: 0.9 },
   garbageBin: { maxSizeScale: 0.85 },
   sandwichPlastic: { maxSizeScale: 0.85, offsetY: -2 },
   glassCup: { maxSizeScale: 0.85 },
