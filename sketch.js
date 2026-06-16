@@ -809,11 +809,6 @@ function platformGetViewportSize() {
     return { w: platformW, h: platformH };
   }
 
-  let vv = window.visualViewport;
-  if (vv) {
-    return { w: vv.width, h: vv.height };
-  }
-
   return { w: window.innerWidth, h: window.innerHeight };
 }
 
@@ -849,7 +844,7 @@ function platformTuckRefY(refY) {
 
 function platformUpdateViewportFit() {
   let vp = platformGetViewportSize();
-  platformScreenScale = min(vp.w / platformW, vp.h / platformH);
+  platformScreenScale = max(vp.w / platformW, vp.h / platformH);
 }
 
 function platformApplyViewportLayout() {
@@ -903,9 +898,11 @@ function platformFitCanvasToScreen() {
   cnv.style.width = cssW + "px";
   cnv.style.height = cssH + "px";
   cnv.style.display = "block";
-  cnv.style.margin = "0 auto";
-  cnv.style.maxWidth = "100vw";
-  cnv.style.maxHeight = "100dvh";
+  cnv.style.position = "absolute";
+  cnv.style.left = "50%";
+  cnv.style.top = "50%";
+  cnv.style.transform = "translate(-50%, -50%)";
+  cnv.style.margin = "0";
 }
 
 

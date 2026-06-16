@@ -6,7 +6,7 @@ body {
   height: 100%;
   height: 100dvh;
   overflow: hidden;
-  background: #ffffff;
+  background: #f4ebdd;
 }
 
 body {
@@ -15,13 +15,12 @@ body {
 }
 
 main {
+  position: relative;
   width: 100%;
   height: 100%;
   height: 100dvh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: #ffffff;
+  overflow: hidden;
+  background: #f4ebdd;
 }
 
 canvas {
