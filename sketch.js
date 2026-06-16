@@ -357,11 +357,11 @@ function platformDrawLiquidGlassButton(
   let fillGrad = ctx.createLinearGradient(0, 0, 0, h);
   fillGrad.addColorStop(
     0,
-    `rgba(${min(255, ar + 35)}, ${min(255, ag + 35)}, ${min(255, ab + 35)}, ${(hover ? 0.88 : 0.84) * a})`
+    `rgba(${hover ? 252 : 250}, ${hover ? 246 : 244}, ${hover ? 238 : 235}, ${0.25 * a})`
   );
   fillGrad.addColorStop(
     1,
-    `rgba(${max(0, ar - 8)}, ${max(0, ag - 8)}, ${max(0, ab - 8)}, ${(hover ? 0.94 : 0.9) * a})`
+    `rgba(${hover ? 248 : 246}, ${hover ? 242 : 240}, ${hover ? 234 : 231}, ${0.25 * a})`
   );
   ctx.fillStyle = fillGrad;
   ctx.fill();
@@ -852,7 +852,7 @@ function platformApplyViewportLayout() {
 
   platformText.introTitle.y = platformTuckRefY(110) + 20;
   platformText.introHint.y = platformTuckRefY(620) + 160;
-  platformText.questionTitle.y = platformTuckRefY(920) + POSTER_LAYOUT.questionPhaseNudgeY;
+  platformText.questionTitle.y = platformTuckRefY(920);
   POSTER_LAYOUT.headerLineY = platformTuckRefY(60) + 20;
   POSTER_LAYOUT.headerTextY = platformTuckRefY(34) + ms(5) + 20;
   POSTER_LAYOUT.choiceY =
@@ -1468,80 +1468,24 @@ function eagleSeparateLooseTargets(targets, cfg) {
 }
 
 function platformLooseScenarioTGroupFromClick(p) {
-  return [0, 1, 2, 3].map((groupIndex) => platformPosterTGroupTarget(p, groupIndex));
-}
+  let cc = p.clickCount;
+  let id = p.cfg.id;
 
-function platformWarmLooseRepelForStage(p) {
-  let cfg = p.cfg;
-
-  if (!cfg || !cfg.getPieceGroup) {
-    return;
+  if (id === "eagle") {
+    return [
+      cc >= 1 ? 1 : 0,
+      cc >= 2 ? 1 : 0,
+      cc >= 3 ? 1 : 0,
+      cc >= 4 ? 1 : 0
+    ];
   }
 
-  let profile = platformLooseGetProfile(cfg);
-
-  if (!profile.hyenaStyleRepel) {
-    return;
-  }
-
-  let pivot = profile.pivot;
-  let savedTGroup = p.tGroup.slice();
-  p.tGroup = platformLooseScenarioTGroupFromClick(p);
-
-  if (!p.looseRepelSmooth) {
-    p.looseRepelSmooth = [];
-  }
-
-  for (let i = 0; i < cfg.totalPieces; i++) {
-    let pieceGroup = cfg.getPieceGroup(i);
-
-    if (platformLooseAssemblerRepelWeight(p.tGroup[pieceGroup]) > 0) {
-      continue;
-    }
-
-    let off = p.pieceOffsets[i];
-
-    if (!off) {
-      continue;
-    }
-
-    let rot = off.rot || 0;
-    let target = platformGetLooseTarget(i, cfg);
-    target = {
-      x: target.x + profile.scatter.x,
-      y: target.y + profile.scatter.y
-    };
-    target = platformLooseFitTargetOffset(cfg, pivot, target.x, target.y, i, rot);
-    let cleared = platformLooseApplyGroupedRepel(
-      p,
-      i,
-      target.x,
-      target.y,
-      0,
-      pieceGroup,
-      rot
-    );
-    let desired = {
-      x: cleared.x - target.x,
-      y: cleared.y - target.y
-    };
-    let prev = p.looseRepelSmooth[i] || { x: 0, y: 0 };
-
-    p.looseRepelSmooth[i] = {
-      x: lerp(prev.x, desired.x, 0.62),
-      y: lerp(prev.y, desired.y, 0.62)
-    };
-  }
-
-  p.tGroup = savedTGroup;
-}
-
-function platformToadWarmLooseRepel(p) {
-  if (!p?.cfg || p.cfg.id !== "toad") {
-    return;
-  }
-
-  platformWarmLooseRepelForStage(p);
+  return [
+    cc >= 1 ? 1 : 0,
+    cc >= 2 ? 1 : 0,
+    cc >= 3 ? 1 : 0,
+    cc >= 3 ? 1 : 0
+  ];
 }
 
 function platformLooseComputeRepelCleared(
@@ -2176,6 +2120,84 @@ function toadKeepLooseTargetsClearOfConnected(targets, cfg) {
 
     targets[i] = { x: ox, y: oy };
   }
+}
+
+function platformToadWarmLooseRepel(p) {
+  let cfg = p.cfg;
+
+  if (!cfg || cfg.id !== "toad" || !cfg.getPieceGroup) {
+    return;
+  }
+
+  let profile = platformLooseGetProfile(cfg);
+
+  if (!profile.hyenaStyleRepel) {
+    return;
+  }
+
+  let pivot = profile.pivot;
+  let savedTGroup = p.tGroup.slice();
+  let projected = [0, 0, 0, 0];
+
+  if (p.clickCount >= 1) {
+    projected[0] = 1;
+  }
+  if (p.clickCount >= 2) {
+    projected[1] = 1;
+  }
+  if (p.clickCount >= 3) {
+    projected[2] = 1;
+    projected[3] = 1;
+  }
+
+  p.tGroup = projected;
+
+  if (!p.looseRepelSmooth) {
+    p.looseRepelSmooth = [];
+  }
+
+  for (let i = 0; i < cfg.totalPieces; i++) {
+    let pieceGroup = cfg.getPieceGroup(i);
+
+    if (platformLooseAssemblerRepelWeight(p.tGroup[pieceGroup]) > 0) {
+      continue;
+    }
+
+    let off = p.pieceOffsets[i];
+
+    if (!off) {
+      continue;
+    }
+
+    let rot = off.rot || 0;
+    let target = platformGetLooseTarget(i, cfg);
+    target = {
+      x: target.x + profile.scatter.x,
+      y: target.y + profile.scatter.y
+    };
+    target = platformLooseFitTargetOffset(cfg, pivot, target.x, target.y, i, rot);
+    let cleared = platformLooseApplyGroupedRepel(
+      p,
+      i,
+      target.x,
+      target.y,
+      0,
+      pieceGroup,
+      rot
+    );
+    let desired = {
+      x: cleared.x - target.x,
+      y: cleared.y - target.y
+    };
+    let prev = p.looseRepelSmooth[i] || { x: 0, y: 0 };
+
+    p.looseRepelSmooth[i] = {
+      x: lerp(prev.x, desired.x, 0.62),
+      y: lerp(prev.y, desired.y, 0.62)
+    };
+  }
+
+  p.tGroup = savedTGroup;
 }
 
 function toadAdjustLooseTargets(targets, cfg) {
@@ -4472,87 +4494,6 @@ function platformDrawQuestionTitle(textColor) {
   );
 }
 
-function platformGetQuestionStageCount(p) {
-  let stages = p.cfg.choiceStages || platformChoiceStages;
-  return stages.length;
-}
-
-function platformGetProgressBaseY() {
-  return (
-    platformText.questionTitle.y +
-    platformText.questionTitle.leading +
-    POSTER_LAYOUT.progressGapBelowQuestion
-  );
-}
-
-function platformDrawQuestionProgress(p) {
-  let cfg = p.cfg;
-  let total = platformGetQuestionStageCount(p);
-  if (total <= 0 || p.clickCount >= cfg.finalClickCount) {
-    return;
-  }
-
-  let dotR = POSTER_LAYOUT.progressDotR;
-  let dashW = POSTER_LAYOUT.progressDashW;
-  let dashH = POSTER_LAYOUT.progressSegmentH;
-  let itemGap = POSTER_LAYOUT.progressItemGap;
-  let trackW = (total - 1) * itemGap + dashW;
-  let startX = (platformW - trackW) / 2;
-  let y = platformGetProgressBaseY();
-  let baseColor = color(cfg.textColor);
-  let accentColor = color(cfg.choiceButtonColor);
-  let now = millis();
-  let celebrateActive =
-    p.progressCelebrateIndex >= 0 && now < p.progressCelebrateUntil;
-
-  noStroke();
-  rectMode(CENTER);
-  ellipseMode(CENTER);
-
-  for (let i = 0; i < total; i++) {
-    let cx = startX + i * itemGap + dashW / 2;
-    let isDone = i < p.clickCount;
-    let isCurrent = i === p.clickCount;
-    let isCelebrate = celebrateActive && i === p.progressCelebrateIndex;
-
-    let segColor;
-    if (isCurrent || isCelebrate) {
-      segColor = color(accentColor);
-      if (isCurrent && !isCelebrate) {
-        let pulse = 200 + sin(frameCount * 0.14) * 35;
-        segColor.setAlpha(pulse);
-      } else {
-        segColor.setAlpha(255);
-      }
-    } else if (isDone) {
-      segColor = color(baseColor);
-      segColor.setAlpha(220);
-    } else {
-      segColor = color(baseColor);
-      segColor.setAlpha(68);
-    }
-
-    fill(segColor);
-
-    if (isCurrent || isCelebrate) {
-      let drawW = dashW;
-      let drawH = dashH;
-      let drawY = y + dashH / 2;
-
-      if (isCelebrate) {
-        let t = 1 - (p.progressCelebrateUntil - now) / POSTER_LAYOUT.progressCelebrateMs;
-        let pop = sin(constrain(t, 0, 1) * PI) * ms(1.4);
-        drawW = dashW + pop;
-        drawH = dashH + pop;
-      }
-
-      rect(cx, drawY, drawW, drawH, ms(1.5));
-    } else {
-      ellipse(cx, y + dashH / 2, dotR * 2, dotR * 2);
-    }
-  }
-}
-
 function platformDrawTightWordText(str, x, y, leading, align = "center", wordGapScale = 0.58) {
   let lines = str.split("\n");
   let spaceW = textWidth(" ") * wordGapScale;
@@ -4621,14 +4562,7 @@ const POSTER_LAYOUT = {
   finalBodyLineCount: 7,
   finalCtaGap: ms(26),
   finalCtaH: ms(56),
-  frameStrokeWeight: 0.9,
-  questionPhaseNudgeY: -20,
-  progressGapBelowQuestion: ms(12),
-  progressDashW: ms(24),
-  progressDotR: ms(3),
-  progressSegmentH: ms(2.5),
-  progressItemGap: ms(18),
-  progressCelebrateMs: 220
+  frameStrokeWeight: 0.9
 };
 
 function platformGetFinalBodyTopY() {
@@ -4659,8 +4593,6 @@ function posterCreateState(id, cfg) {
     rightBox: null,
     finalStart: null,
     finalCtaBox: null,
-    progressCelebrateUntil: 0,
-    progressCelebrateIndex: -1,
     jumpReadyTime: null,
     touchDevice: false,
     finalMotion: 0,
@@ -4873,7 +4805,7 @@ const posterRegistry = {
     applyPiece: applyTurtlePieceTransform
   }),
   eagle: posterCreateState("eagle", {
-    finalClickCount: 3,
+    finalClickCount: 4,
     textColor: PLATFORM_TEXT_COLOR,
     choiceButtonColor: "#c7aa89",
     textRgb: PLATFORM_TEXT_RGB,
@@ -4890,7 +4822,7 @@ const posterRegistry = {
     pipeline: ["clear", "bg", "animal", "question", "footer", "feedback", "frame", "header"],
     clearColor: PLATFORM_BG_COLOR,
     resetFinalOnCorrect: false,
-    nextClickCount(stage) { return stage + 1; },
+    nextClickCount(stage) { return stage === 2 ? 4 : stage + 1; },
     randomSeed: 100,
     totalPieces: 19,
     pieceRandom: {
@@ -5246,6 +5178,10 @@ function platformClearSharedPosterCaches() {
 function platformPosterTGroupTarget(p, groupIndex) {
   let cc = p.clickCount;
 
+  if (p.cfg.id === "eagle") {
+    return cc >= [1, 2, 3, 4][groupIndex] ? 1 : 0;
+  }
+
   if (groupIndex <= 1) {
     return cc >= groupIndex + 1 ? 1 : 0;
   }
@@ -5322,8 +5258,6 @@ function posterRestartFromWrongAnswer(p) {
   p.looseWobbleDampen = null;
   p.toadRepelBoost = 0;
   p.finalStart = null;
-  p.progressCelebrateUntil = 0;
-  p.progressCelebrateIndex = -1;
   p.jumpReadyTime = null;
 }
 
@@ -5342,8 +5276,6 @@ function posterReset(p) {
   p.disassembleRepelWarmup = 0;
   p.finalStart = null;
   p.finalCtaBox = null;
-  p.progressCelebrateUntil = 0;
-  p.progressCelebrateIndex = -1;
   p.jumpReadyTime = null;
   p.finalMotion = 0;
   p.deer = { x: 30, y: -80, scale: 0.92, drawX: 30, drawY: -80 };
@@ -5499,7 +5431,6 @@ function posterDrawQuestionUI(p) {
       posterDrawChoicePanel(p, x, y, w, h, img, label, imgId, choice),
     cfg.choiceStages || platformChoiceStages
   );
-  platformDrawQuestionProgress(p);
 }
 
 function posterDrawChoicePanel(p, x, y, w, h, img, label, imgId, choice = {}) {
@@ -5656,17 +5587,12 @@ function posterHandleChoicePress(id) {
     (correctSide === "left" && clickedRight);
 
   if (clickedCorrect) {
-    p.progressCelebrateIndex = stage;
-    p.progressCelebrateUntil = millis() + POSTER_LAYOUT.progressCelebrateMs;
     p.clickCount = cfg.nextClickCount(stage);
 
     if (id === "toad") {
       p.toadRepelBoost = 160;
-    }
-
-    if (platformLooseGetProfile(cfg).hyenaStyleRepel) {
-      platformWarmLooseRepelForStage(p);
-    } else {
+      platformToadWarmLooseRepel(p);
+    } else if (!platformLooseGetProfile(cfg).hyenaStyleRepel) {
       p.looseRepelSmooth = null;
     }
 
@@ -5709,7 +5635,7 @@ const platformAnimalHandlers = {
     windowResized: () => posterWindowResized("turtle")
   },
   eagle: {
-    finalClickCount: 3,
+    finalClickCount: 4,
     draw: () => posterDraw("eagle"),
     setup: () => posterSetup("eagle"),
     mousePressed: () => posterMousePressed("eagle"),
@@ -6005,7 +5931,7 @@ function drawEagleAnimal() {
   let floatIntensity;
 
   let eagleFullyAssembled =
-    p.clickCount >= 3 &&
+    p.clickCount >= 4 &&
     p.tGroup[0] > 0.96 &&
     p.tGroup[1] > 0.96 &&
     p.tGroup[2] > 0.96 &&
