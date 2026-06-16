@@ -17,6 +17,12 @@ let platformPosterFadeStartTime = null;
 let platformPosterFadeDuration = 320;
 let platformPosterFadeColor = null;
 
+let platformLoadingTargetAnimal = null;
+let platformLoadingStartTime = null;
+const PLATFORM_LOADING_HOLD_MS = 2000;
+const PLATFORM_LOADING_MORPH_MS = 700;
+const PLATFORM_LOADING_TOTAL_MS = 9000;
+
 // Original poster art/layout reference (650×975)
 const REF_W = 650;
 const REF_H = 975;
@@ -48,6 +54,11 @@ const ANIMAL_ANCHOR_Y = 400;
 const ANIMAL_SCREEN_OFFSET_Y = 50;
 const DEER_HYENA_EXTRA_SCREEN_OFFSET_Y = 20;
 const INTRO_TRIANGLES_OFFSET_Y = -50;
+const PLATFORM_LOADING_TRIANGLE_SIZE = mx(118);
+
+function platformGetLoadingTriangleCy() {
+  return my(400) + INTRO_TRIANGLES_OFFSET_Y;
+}
 
 function platformScreenPxToAnimalRefY(screenPx) {
   return screenPx * ANIMAL_REF_W / platformW;
@@ -113,6 +124,15 @@ const platformText = {
     y: my(620) + 160,
     size: ms(17),
     alpha: 180
+  },
+
+  loadingHint: {
+    text:
+      "In the next steps, you'll answer a few questions about everyday decisions and how they can help protect the environment.",
+    x: platformW / 2,
+    y: my(560),
+    size: ms(17),
+    leading: ms(20)
   },
 
   questionTitle: {
@@ -225,13 +245,11 @@ function setup() {
 function draw() {
   if (platformMode === "intro") {
     platformDrawIntro();
+    return;
+  }
 
-    if (platformMode !== "intro") {
-      platformEnsureAnimalStarted();
-      platformInvokeAnimal("draw");
-      platformDrawPosterFadeOverlay();
-    }
-
+  if (platformMode === "loading") {
+    platformDrawLoading();
     return;
   }
 
@@ -243,6 +261,10 @@ function draw() {
 function mousePressed() {
   if (platformMode === "intro") {
     platformHandleIntroPress(mouseX, mouseY);
+    return;
+  }
+
+  if (platformMode === "loading") {
     return;
   }
 
@@ -260,6 +282,10 @@ function touchStarted() {
     return false;
   }
 
+  if (platformMode === "loading") {
+    return false;
+  }
+
   if (platformIsCurrentPosterFinal()) {
     platformHandleFinalCtaPress();
     return false;
@@ -271,7 +297,7 @@ function touchStarted() {
 function windowResized() {
   platformApplyViewportLayout();
 
-  if (platformMode !== "intro") {
+  if (platformMode !== "intro" && platformMode !== "loading") {
     platformInvokeAnimal("windowResized");
   }
 }
@@ -444,6 +470,8 @@ function platformReturnToIntro() {
   platformIntroTransitionActive = false;
   platformIntroTransitionIndex = -1;
   platformIntroTransitionSnapshot = null;
+  platformLoadingTargetAnimal = null;
+  platformLoadingStartTime = null;
   platformPosterFadeStartTime = null;
   platformPosterFadeColor = null;
   posterResetAll();
@@ -518,12 +546,7 @@ function platformDrawIntro() {
   fill(PLATFORM_TEXT_COLOR);
   noStroke();
 
-  let introFont =
-    posterRegistry.turtle.grungeFont ||
-    posterRegistry.eagle.grungeFont ||
-    posterRegistry.toad.grungeFont ||
-    posterRegistry.hyena.grungeFont ||
-    posterRegistry.deer.grungeFont;
+  let introFont = platformGetIntroGrungeFont();
 
   if (introFont) {
     textFont(introFont);
@@ -590,56 +613,191 @@ function platformDrawIntro() {
     platformText.introHint.x,
     platformText.introHint.y
   );
+}
 
-  if (platformIntroTransitionActive && platformIntroTransitionSnapshot) {
-    let elapsed = millis() - platformIntroTransitionStart;
-    let t = constrain(elapsed / platformIntroTransitionDuration, 0, 1);
-    let e = platformEaseOutCubic(t);
-
-    let animal = platformAnimals[platformIntroTransitionIndex];
-    let snap = platformIntroTransitionSnapshot;
-    let pts = snap.pts;
-    let cx = snap.cx;
-    let cy = snap.cy;
-    let zoomScale = lerp(snap.startScale, snap.zoomScale, e);
-
-    let bgMix = constrain(map(e, 0.5, 0.9, 0, 1), 0, 1);
-
-    if (bgMix > 0) {
-      noStroke();
-      fill(lerpColor(color("#F0E8DC"), color(animal.color), bgMix));
-      rect(0, 0, platformW, platformH);
-    }
-
-    push();
-    translate(cx, cy);
-    scale(zoomScale);
-    translate(-cx, -cy);
-
-    noStroke();
-    fill(animal.color);
-
-    triangle(
-      pts[0][0], pts[0][1],
-      pts[1][0], pts[1][1],
-      pts[2][0], pts[2][1]
-    );
-
-    pop();
-
-    if (t >= 1) {
-      platformMode = animal.id;
-      platformSelectedStarted = false;
-      posterReset(posterRegistry[animal.id]);
-
-      platformIntroTransitionActive = false;
-      platformIntroTransitionIndex = -1;
-      platformIntroTransitionSnapshot = null;
-
-      platformPosterFadeColor = animal.color;
-      platformPosterFadeStartTime = millis();
+function platformGetLoadingStartIndex() {
+  for (let i = 0; i < platformAnimals.length; i++) {
+    if (platformAnimals[i].id === platformLoadingTargetAnimal) {
+      return i;
     }
   }
+  return 0;
+}
+
+function platformGetLoadingTriangleRefPts(index) {
+  let animal = platformAnimals[index];
+  return animal.pts.map((p) => [mx(p[0]), platformTuckRefY(p[1]) + INTRO_TRIANGLES_OFFSET_Y]);
+}
+
+function platformSortTriangleVerts(pts) {
+  let cx = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
+  let cy = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
+  return pts
+    .slice()
+    .sort((a, b) => atan2(a[1] - cy, a[0] - cx) - atan2(b[1] - cy, b[0] - cx));
+}
+
+function platformNormalizeTriangleVerts(pts, targetCx, targetCy, targetSize) {
+  let sorted = platformSortTriangleVerts(pts);
+  let cx = (sorted[0][0] + sorted[1][0] + sorted[2][0]) / 3;
+  let cy = (sorted[0][1] + sorted[1][1] + sorted[2][1]) / 3;
+  let maxR = 1;
+
+  for (let i = 0; i < 3; i++) {
+    maxR = max(maxR, dist(sorted[i][0], sorted[i][1], cx, cy));
+  }
+
+  let scale = targetSize / maxR;
+  return sorted.map((p) => [
+    targetCx + (p[0] - cx) * scale,
+    targetCy + (p[1] - cy) * scale
+  ]);
+}
+
+function platformLerpTriangleVerts(a, b, t) {
+  return [
+    [lerp(a[0][0], b[0][0], t), lerp(a[0][1], b[0][1], t)],
+    [lerp(a[1][0], b[1][0], t), lerp(a[1][1], b[1][1], t)],
+    [lerp(a[2][0], b[2][0], t), lerp(a[2][1], b[2][1], t)]
+  ];
+}
+
+function platformGetLoadingMorphState(elapsed) {
+  let count = platformAnimals.length;
+  let segmentMs = PLATFORM_LOADING_HOLD_MS + PLATFORM_LOADING_MORPH_MS;
+  let startIndex = platformGetLoadingStartIndex();
+  let segment = floor(elapsed / segmentMs);
+  let segmentT = elapsed % segmentMs;
+  let fromIndex = (startIndex + segment) % count;
+  let toIndex = (fromIndex + 1) % count;
+  let morphT =
+    segmentT < PLATFORM_LOADING_HOLD_MS
+      ? 0
+      : platformEaseInOutSine(
+          (segmentT - PLATFORM_LOADING_HOLD_MS) / PLATFORM_LOADING_MORPH_MS
+        );
+
+  return { fromIndex, toIndex, morphT, segmentT };
+}
+
+function platformGetIntroGrungeFont() {
+  return (
+    posterRegistry.turtle.grungeFont ||
+    posterRegistry.eagle.grungeFont ||
+    posterRegistry.toad.grungeFont ||
+    posterRegistry.hyena.grungeFont ||
+    posterRegistry.deer.grungeFont
+  );
+}
+
+function platformDrawLoadingTriangle(morph, breathe = 0) {
+  let fromPts = platformNormalizeTriangleVerts(
+    platformGetLoadingTriangleRefPts(morph.fromIndex),
+    platformW / 2,
+    platformGetLoadingTriangleCy(),
+    PLATFORM_LOADING_TRIANGLE_SIZE
+  );
+  let toPts = platformNormalizeTriangleVerts(
+    platformGetLoadingTriangleRefPts(morph.toIndex),
+    platformW / 2,
+    platformGetLoadingTriangleCy(),
+    PLATFORM_LOADING_TRIANGLE_SIZE
+  );
+  let pts = platformLerpTriangleVerts(fromPts, toPts, morph.morphT);
+  let fromColor = color(platformAnimals[morph.fromIndex].color);
+  let toColor = color(platformAnimals[morph.toIndex].color);
+  let triColor = lerpColor(fromColor, toColor, morph.morphT);
+  let holdPulse =
+    morph.morphT < 0.001
+      ? 1 + sin((morph.segmentT / PLATFORM_LOADING_HOLD_MS) * TWO_PI) * 0.018
+      : 1;
+  let morphLift = sin(morph.morphT * PI) * 0.035;
+  let scale = holdPulse + morphLift + breathe;
+
+  let cx = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
+  let cy = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
+
+  noStroke();
+  fill(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 10);
+  ellipse(cx, cy + PLATFORM_LOADING_TRIANGLE_SIZE * 0.18, PLATFORM_LOADING_TRIANGLE_SIZE * 1.1, PLATFORM_LOADING_TRIANGLE_SIZE * 0.18);
+
+  push();
+  translate(cx, cy);
+  scale(scale);
+  translate(-cx, -cy);
+  fill(triColor);
+  triangle(
+    pts[0][0], pts[0][1],
+    pts[1][0], pts[1][1],
+    pts[2][0], pts[2][1]
+  );
+  pop();
+}
+
+function platformBeginAnimalFromLoading() {
+  let animalId = platformLoadingTargetAnimal;
+  if (!animalId || !posterRegistry[animalId]) {
+    platformReturnToIntro();
+    return;
+  }
+
+  platformMode = animalId;
+  platformSelectedStarted = false;
+  platformLoadingTargetAnimal = null;
+  platformLoadingStartTime = null;
+  posterReset(posterRegistry[animalId]);
+  platformPosterFadeColor = PLATFORM_BG_COLOR;
+  platformPosterFadeDuration = 850;
+  platformPosterFadeStartTime = millis();
+}
+
+function platformDrawLoading() {
+  if (platformLoadingStartTime === null) {
+    platformLoadingStartTime = millis();
+  }
+
+  let elapsed = millis() - platformLoadingStartTime;
+
+  if (elapsed >= PLATFORM_LOADING_TOTAL_MS) {
+    platformBeginAnimalFromLoading();
+    platformEnsureAnimalStarted();
+    platformInvokeAnimal("draw");
+    platformDrawPosterFadeOverlay();
+    return;
+  }
+
+  platformDrawMainBackground();
+
+  let morph = platformGetLoadingMorphState(elapsed);
+  let breathe = sin(elapsed * 0.0045) * 0.01;
+  platformDrawLoadingTriangle(morph, breathe);
+
+  let introFont = platformGetIntroGrungeFont();
+  if (introFont) {
+    textFont(introFont);
+  }
+
+  let hintAlpha = constrain(map(elapsed, 500, 1300, 0, 255), 0, 255);
+  fill(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], hintAlpha);
+  textAlign(CENTER, TOP);
+  textSize(platformText.loadingHint.size);
+  textLeading(platformText.loadingHint.leading);
+  textStyle(NORMAL);
+  text(
+    platformText.loadingHint.text,
+    platformText.loadingHint.x,
+    platformText.loadingHint.y,
+    platformW - POSTER_LAYOUT.marginX * 2
+  );
+}
+
+function platformStartLoadingForAnimal(animalId) {
+  platformLoadingTargetAnimal = animalId;
+  platformMode = "loading";
+  platformLoadingStartTime = millis();
+  platformIntroTransitionActive = false;
+  platformIntroTransitionIndex = -1;
+  platformIntroTransitionSnapshot = null;
 }
 
 function platformHandleIntroPress(x, y) {
@@ -651,31 +809,10 @@ function platformHandleIntroPress(x, y) {
     let pts = platformGetAnimatedTrianglePoints(i);
 
     if (platformPointInTriangle(x, y, pts[0], pts[1], pts[2])) {
-      let cx = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
-      let cy = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
-
-      platformIntroTransitionSnapshot = {
-        pts: [
-          [pts[0][0], pts[0][1]],
-          [pts[1][0], pts[1][1]],
-          [pts[2][0], pts[2][1]]
-        ],
-        cx,
-        cy,
-        startScale: platformIntroHover === i ? 1.035 : 1,
-        zoomScale: platformGetIntroZoomScale(pts, cx, cy)
-      };
-      platformIntroTransitionActive = true;
-      platformIntroTransitionIndex = i;
-      platformIntroTransitionStart = millis();
+      platformStartLoadingForAnimal(platformAnimals[i].id);
       return;
     }
   }
-}
-
-function platformEaseInOutSine(x) {
-  x = constrain(x, 0, 1);
-  return -(cos(PI * x) - 1) / 2;
 }
 
 function platformEaseInOutSine(x) {
@@ -699,6 +836,7 @@ function platformDrawPosterFadeOverlay() {
 
   if (a <= 0) {
     platformPosterFadeStartTime = null;
+    platformPosterFadeDuration = 320;
     return;
   }
 
@@ -854,6 +992,7 @@ function platformApplyViewportLayout() {
 
   platformText.introTitle.y = platformTuckRefY(110) + 20;
   platformText.introHint.y = platformTuckRefY(620) + 160;
+  platformText.loadingHint.y = platformTuckRefY(560);
   platformText.questionTitle.y = platformTuckRefY(920) + POSTER_LAYOUT.questionPhaseNudgeY;
   POSTER_LAYOUT.headerLineY = platformTuckRefY(60) + 20;
   POSTER_LAYOUT.headerTextY = platformTuckRefY(34) + ms(5) + 20;
