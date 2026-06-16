@@ -4518,15 +4518,22 @@ function platformDrawQuestionProgress(p) {
   }
 
   let dotR = POSTER_LAYOUT.progressDotR;
+  let dotD = dotR * 2;
   let dashW = POSTER_LAYOUT.progressDashW;
-  let dashH = POSTER_LAYOUT.progressSegmentH;
-  let itemGap = POSTER_LAYOUT.progressItemGap;
-  let trackSpan = max(0, total - 1) * itemGap;
-  let startCx = platformW / 2 - trackSpan / 2;
+  let dashH = dotD;
+  let gap = POSTER_LAYOUT.progressItemGap;
   let y = platformGetProgressBaseY();
-  let markerY = y + dashH / 2;
+  let markerY = y + dotD / 2;
   let baseColor = color(cfg.textColor);
   let currentIndex = constrain(p.clickCount, 0, total - 1);
+
+  let sizes = [];
+  for (let i = 0; i < total; i++) {
+    sizes.push(i === currentIndex ? dashW : dotD);
+  }
+
+  let trackW = sizes.reduce((sum, size) => sum + size, 0) + gap * max(0, total - 1);
+  let cursorX = platformW / 2 - trackW / 2;
 
   push();
   noStroke();
@@ -4534,19 +4541,21 @@ function platformDrawQuestionProgress(p) {
   ellipseMode(CENTER);
 
   for (let i = 0; i < total; i++) {
-    let cx = startCx + i * itemGap;
+    let cx = cursorX + sizes[i] / 2;
 
     if (i === currentIndex) {
       let dashColor = color(baseColor);
       dashColor.setAlpha(255);
       fill(dashColor);
-      rect(cx, markerY, dashW, dashH, ms(1.5));
+      rect(cx, markerY, dashW, dashH, dashH / 2);
     } else {
       let dotColor = color(baseColor);
       dotColor.setAlpha(POSTER_LAYOUT.progressDotAlpha);
       fill(dotColor);
-      ellipse(cx, markerY, dotR * 2, dotR * 2);
+      ellipse(cx, markerY, dotD, dotD);
     }
+
+    cursorX += sizes[i] + gap;
   }
 
   pop();
@@ -4623,10 +4632,9 @@ const POSTER_LAYOUT = {
   frameStrokeWeight: 0.9,
   questionPhaseNudgeY: -20,
   progressGapBelowQuestion: ms(12),
-  progressDashW: ms(24),
+  progressDashW: ms(10),
   progressDotR: ms(3),
-  progressSegmentH: ms(2.5),
-  progressItemGap: ms(18),
+  progressItemGap: ms(12),
   progressDotAlpha: 72
 };
 
