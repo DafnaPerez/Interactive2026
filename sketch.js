@@ -19,9 +19,9 @@ let platformPosterFadeColor = null;
 
 let platformLoadingTargetAnimal = null;
 let platformLoadingStartTime = null;
-const PLATFORM_LOADING_HOLD_MS = 2000;
-const PLATFORM_LOADING_MORPH_MS = 700;
-const PLATFORM_LOADING_TOTAL_MS = 9000;
+const PLATFORM_LOADING_HOLD_MS = 1000;
+const PLATFORM_LOADING_MORPH_MS = 450;
+const PLATFORM_LOADING_TOTAL_MS = 7000;
 
 // Original poster art/layout reference (650×975)
 const REF_W = 650;
@@ -57,7 +57,7 @@ const INTRO_TRIANGLES_OFFSET_Y = -50;
 const PLATFORM_LOADING_TRIANGLE_SIZE = mx(118);
 
 function platformGetLoadingTriangleCy() {
-  return my(400) + INTRO_TRIANGLES_OFFSET_Y;
+  return my(330) + INTRO_TRIANGLES_OFFSET_Y;
 }
 
 function platformScreenPxToAnimalRefY(screenPx) {
@@ -718,9 +718,6 @@ function platformDrawLoadingTriangle(morph, breathe = 0) {
   let cy = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
 
   noStroke();
-  fill(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 10);
-  ellipse(cx, cy + PLATFORM_LOADING_TRIANGLE_SIZE * 0.18, PLATFORM_LOADING_TRIANGLE_SIZE * 1.1, PLATFORM_LOADING_TRIANGLE_SIZE * 0.18);
-
   push();
   translate(cx, cy);
   scale(triScale);
@@ -777,17 +774,24 @@ function platformDrawLoading() {
     textFont(introFont);
   }
 
-  let hintAlpha = constrain(map(elapsed, 500, 1300, 0, 255), 0, 255);
+  let hintAlpha = constrain(map(elapsed, 300, 900, 0, 255), 0, 255);
   fill(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], hintAlpha);
-  textAlign(CENTER, TOP);
-  textSize(platformText.loadingHint.size);
-  textLeading(platformText.loadingHint.leading);
   textStyle(NORMAL);
-  text(
+
+  let hintSize = platformText.loadingHint.size;
+  let hintLeading = platformText.loadingHint.leading;
+  let hintMaxW = platformW - mx(34) * 2;
+  textSize(hintSize);
+  let hintLines = platformWrapTextLines(platformText.loadingHint.text, hintMaxW);
+  let hintBlockH = (hintLines.length - 1) * hintLeading + hintSize;
+  let hintY = (platformH - hintBlockH) / 2;
+
+  platformDrawWrappedCenterText(
     platformText.loadingHint.text,
-    platformText.loadingHint.x,
-    platformText.loadingHint.y,
-    platformW - mx(34) * 2
+    platformW / 2,
+    hintY,
+    hintMaxW,
+    hintLeading
   );
 }
 
@@ -4701,6 +4705,41 @@ function platformDrawQuestionProgress(p) {
   }
 
   pop();
+}
+
+function platformWrapTextLines(str, maxWidth) {
+  let words = str.split(/\s+/).filter((word) => word.length > 0);
+  let lines = [];
+  let line = "";
+
+  for (let i = 0; i < words.length; i++) {
+    let word = words[i];
+    let test = line ? `${line} ${word}` : word;
+
+    if (textWidth(test) > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  }
+
+  if (line) {
+    lines.push(line);
+  }
+
+  return lines;
+}
+
+function platformDrawWrappedCenterText(str, centerX, y, maxWidth, leading) {
+  textAlign(CENTER, TOP);
+  let lines = platformWrapTextLines(str, maxWidth);
+
+  for (let i = 0; i < lines.length; i++) {
+    text(lines[i], centerX, y + i * leading);
+  }
+
+  return lines.length;
 }
 
 function platformDrawTightWordText(str, x, y, leading, align = "center", wordGapScale = 0.58) {
