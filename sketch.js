@@ -357,11 +357,11 @@ function platformDrawLiquidGlassButton(
   let fillGrad = ctx.createLinearGradient(0, 0, 0, h);
   fillGrad.addColorStop(
     0,
-    `rgba(${hover ? 252 : 250}, ${hover ? 246 : 244}, ${hover ? 238 : 235}, ${0.25 * a})`
+    `rgba(${min(255, ar + 35)}, ${min(255, ag + 35)}, ${min(255, ab + 35)}, ${(hover ? 0.88 : 0.84) * a})`
   );
   fillGrad.addColorStop(
     1,
-    `rgba(${hover ? 248 : 246}, ${hover ? 242 : 240}, ${hover ? 234 : 231}, ${0.25 * a})`
+    `rgba(${max(0, ar - 8)}, ${max(0, ag - 8)}, ${max(0, ab - 8)}, ${(hover ? 0.94 : 0.9) * a})`
   );
   ctx.fillStyle = fillGrad;
   ctx.fill();
@@ -1468,24 +1468,80 @@ function eagleSeparateLooseTargets(targets, cfg) {
 }
 
 function platformLooseScenarioTGroupFromClick(p) {
-  let cc = p.clickCount;
-  let id = p.cfg.id;
+  return [0, 1, 2, 3].map((groupIndex) => platformPosterTGroupTarget(p, groupIndex));
+}
 
-  if (id === "eagle") {
-    return [
-      cc >= 1 ? 1 : 0,
-      cc >= 2 ? 1 : 0,
-      cc >= 3 ? 1 : 0,
-      cc >= 4 ? 1 : 0
-    ];
+function platformWarmLooseRepelForStage(p) {
+  let cfg = p.cfg;
+
+  if (!cfg || !cfg.getPieceGroup) {
+    return;
   }
 
-  return [
-    cc >= 1 ? 1 : 0,
-    cc >= 2 ? 1 : 0,
-    cc >= 3 ? 1 : 0,
-    cc >= 3 ? 1 : 0
-  ];
+  let profile = platformLooseGetProfile(cfg);
+
+  if (!profile.hyenaStyleRepel) {
+    return;
+  }
+
+  let pivot = profile.pivot;
+  let savedTGroup = p.tGroup.slice();
+  p.tGroup = platformLooseScenarioTGroupFromClick(p);
+
+  if (!p.looseRepelSmooth) {
+    p.looseRepelSmooth = [];
+  }
+
+  for (let i = 0; i < cfg.totalPieces; i++) {
+    let pieceGroup = cfg.getPieceGroup(i);
+
+    if (platformLooseAssemblerRepelWeight(p.tGroup[pieceGroup]) > 0) {
+      continue;
+    }
+
+    let off = p.pieceOffsets[i];
+
+    if (!off) {
+      continue;
+    }
+
+    let rot = off.rot || 0;
+    let target = platformGetLooseTarget(i, cfg);
+    target = {
+      x: target.x + profile.scatter.x,
+      y: target.y + profile.scatter.y
+    };
+    target = platformLooseFitTargetOffset(cfg, pivot, target.x, target.y, i, rot);
+    let cleared = platformLooseApplyGroupedRepel(
+      p,
+      i,
+      target.x,
+      target.y,
+      0,
+      pieceGroup,
+      rot
+    );
+    let desired = {
+      x: cleared.x - target.x,
+      y: cleared.y - target.y
+    };
+    let prev = p.looseRepelSmooth[i] || { x: 0, y: 0 };
+
+    p.looseRepelSmooth[i] = {
+      x: lerp(prev.x, desired.x, 0.62),
+      y: lerp(prev.y, desired.y, 0.62)
+    };
+  }
+
+  p.tGroup = savedTGroup;
+}
+
+function platformToadWarmLooseRepel(p) {
+  if (!p?.cfg || p.cfg.id !== "toad") {
+    return;
+  }
+
+  platformWarmLooseRepelForStage(p);
 }
 
 function platformLooseComputeRepelCleared(
@@ -2120,84 +2176,6 @@ function toadKeepLooseTargetsClearOfConnected(targets, cfg) {
 
     targets[i] = { x: ox, y: oy };
   }
-}
-
-function platformToadWarmLooseRepel(p) {
-  let cfg = p.cfg;
-
-  if (!cfg || cfg.id !== "toad" || !cfg.getPieceGroup) {
-    return;
-  }
-
-  let profile = platformLooseGetProfile(cfg);
-
-  if (!profile.hyenaStyleRepel) {
-    return;
-  }
-
-  let pivot = profile.pivot;
-  let savedTGroup = p.tGroup.slice();
-  let projected = [0, 0, 0, 0];
-
-  if (p.clickCount >= 1) {
-    projected[0] = 1;
-  }
-  if (p.clickCount >= 2) {
-    projected[1] = 1;
-  }
-  if (p.clickCount >= 3) {
-    projected[2] = 1;
-    projected[3] = 1;
-  }
-
-  p.tGroup = projected;
-
-  if (!p.looseRepelSmooth) {
-    p.looseRepelSmooth = [];
-  }
-
-  for (let i = 0; i < cfg.totalPieces; i++) {
-    let pieceGroup = cfg.getPieceGroup(i);
-
-    if (platformLooseAssemblerRepelWeight(p.tGroup[pieceGroup]) > 0) {
-      continue;
-    }
-
-    let off = p.pieceOffsets[i];
-
-    if (!off) {
-      continue;
-    }
-
-    let rot = off.rot || 0;
-    let target = platformGetLooseTarget(i, cfg);
-    target = {
-      x: target.x + profile.scatter.x,
-      y: target.y + profile.scatter.y
-    };
-    target = platformLooseFitTargetOffset(cfg, pivot, target.x, target.y, i, rot);
-    let cleared = platformLooseApplyGroupedRepel(
-      p,
-      i,
-      target.x,
-      target.y,
-      0,
-      pieceGroup,
-      rot
-    );
-    let desired = {
-      x: cleared.x - target.x,
-      y: cleared.y - target.y
-    };
-    let prev = p.looseRepelSmooth[i] || { x: 0, y: 0 };
-
-    p.looseRepelSmooth[i] = {
-      x: lerp(prev.x, desired.x, 0.62),
-      y: lerp(prev.y, desired.y, 0.62)
-    };
-  }
-
-  p.tGroup = savedTGroup;
 }
 
 function toadAdjustLooseTargets(targets, cfg) {
@@ -5684,8 +5662,11 @@ function posterHandleChoicePress(id) {
 
     if (id === "toad") {
       p.toadRepelBoost = 160;
-      platformToadWarmLooseRepel(p);
-    } else if (!platformLooseGetProfile(cfg).hyenaStyleRepel) {
+    }
+
+    if (platformLooseGetProfile(cfg).hyenaStyleRepel) {
+      platformWarmLooseRepelForStage(p);
+    } else {
       p.looseRepelSmooth = null;
     }
 
