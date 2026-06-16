@@ -4630,7 +4630,7 @@ const POSTER_LAYOUT = {
   finalCtaGap: ms(26),
   finalCtaH: ms(56),
   frameStrokeWeight: 0.9,
-  questionPhaseNudgeY: -20,
+  questionPhaseNudgeY: -10,
   progressGapBelowQuestion: ms(12),
   progressDashW: ms(10),
   progressDotR: ms(3),
