@@ -852,7 +852,7 @@ function platformApplyViewportLayout() {
 
   platformText.introTitle.y = platformTuckRefY(110) + 20;
   platformText.introHint.y = platformTuckRefY(620) + 160;
-  platformText.questionTitle.y = platformTuckRefY(920);
+  platformText.questionTitle.y = platformTuckRefY(920) + POSTER_LAYOUT.questionPhaseNudgeY;
   POSTER_LAYOUT.headerLineY = platformTuckRefY(60) + 20;
   POSTER_LAYOUT.headerTextY = platformTuckRefY(34) + ms(5) + 20;
   POSTER_LAYOUT.choiceY =
@@ -4500,7 +4500,11 @@ function platformGetQuestionStageCount(p) {
 }
 
 function platformGetProgressBaseY() {
-  return POSTER_LAYOUT.headerLineY + POSTER_LAYOUT.headerNudgeY + POSTER_LAYOUT.progressGapBelowLine;
+  return (
+    platformText.questionTitle.y +
+    platformText.questionTitle.leading +
+    POSTER_LAYOUT.progressGapBelowQuestion
+  );
 }
 
 function platformDrawQuestionProgress(p) {
@@ -4510,10 +4514,11 @@ function platformDrawQuestionProgress(p) {
     return;
   }
 
-  let segW = POSTER_LAYOUT.progressSegmentW;
-  let segH = POSTER_LAYOUT.progressSegmentH;
-  let segGap = POSTER_LAYOUT.progressSegmentGap;
-  let trackW = total * segW + (total - 1) * segGap;
+  let dotR = POSTER_LAYOUT.progressDotR;
+  let dashW = POSTER_LAYOUT.progressDashW;
+  let dashH = POSTER_LAYOUT.progressSegmentH;
+  let itemGap = POSTER_LAYOUT.progressItemGap;
+  let trackW = (total - 1) * itemGap + dashW;
   let startX = (platformW - trackW) / 2;
   let y = platformGetProgressBaseY();
   let baseColor = color(cfg.textColor);
@@ -4523,52 +4528,51 @@ function platformDrawQuestionProgress(p) {
     p.progressCelebrateIndex >= 0 && now < p.progressCelebrateUntil;
 
   noStroke();
-  rectMode(CORNER);
+  rectMode(CENTER);
+  ellipseMode(CENTER);
 
   for (let i = 0; i < total; i++) {
-    let x = startX + i * (segW + segGap);
+    let cx = startX + i * itemGap + dashW / 2;
     let isDone = i < p.clickCount;
     let isCurrent = i === p.clickCount;
     let isCelebrate = celebrateActive && i === p.progressCelebrateIndex;
-    let drawH = segH;
-    let drawY = y;
 
     let segColor;
-    if (isDone || isCelebrate) {
-      segColor = color(baseColor);
-      segColor.setAlpha(255);
-    } else if (isCurrent) {
+    if (isCurrent || isCelebrate) {
       segColor = color(accentColor);
-      let pulse = 200 + sin(frameCount * 0.14) * 35;
-      segColor.setAlpha(pulse);
+      if (isCurrent && !isCelebrate) {
+        let pulse = 200 + sin(frameCount * 0.14) * 35;
+        segColor.setAlpha(pulse);
+      } else {
+        segColor.setAlpha(255);
+      }
+    } else if (isDone) {
+      segColor = color(baseColor);
+      segColor.setAlpha(220);
     } else {
       segColor = color(baseColor);
       segColor.setAlpha(68);
     }
 
-    if (isCelebrate) {
-      let t = 1 - (p.progressCelebrateUntil - now) / POSTER_LAYOUT.progressCelebrateMs;
-      let pop = sin(constrain(t, 0, 1) * PI) * ms(1.4);
-      drawH = segH + pop;
-      drawY = y - pop / 2;
-    }
-
     fill(segColor);
-    rect(x, drawY, segW, drawH, ms(1.5));
-  }
 
-  platformApplyGrungeFont(p.grungeFont);
-  textAlign(CENTER, TOP);
-  textSize(platformText.choiceLabel.size);
-  noStroke();
-  let labelColor = color(baseColor);
-  labelColor.setAlpha(platformText.choiceLabel.alpha);
-  fill(labelColor);
-  text(
-    `${p.clickCount + 1} of ${total}`,
-    platformW / 2,
-    y + segH + POSTER_LAYOUT.progressLabelGap
-  );
+    if (isCurrent || isCelebrate) {
+      let drawW = dashW;
+      let drawH = dashH;
+      let drawY = y + dashH / 2;
+
+      if (isCelebrate) {
+        let t = 1 - (p.progressCelebrateUntil - now) / POSTER_LAYOUT.progressCelebrateMs;
+        let pop = sin(constrain(t, 0, 1) * PI) * ms(1.4);
+        drawW = dashW + pop;
+        drawH = dashH + pop;
+      }
+
+      rect(cx, drawY, drawW, drawH, ms(1.5));
+    } else {
+      ellipse(cx, y + dashH / 2, dotR * 2, dotR * 2);
+    }
+  }
 }
 
 function platformDrawTightWordText(str, x, y, leading, align = "center", wordGapScale = 0.58) {
@@ -4640,11 +4644,12 @@ const POSTER_LAYOUT = {
   finalCtaGap: ms(26),
   finalCtaH: ms(56),
   frameStrokeWeight: 0.9,
-  progressGapBelowLine: ms(14),
-  progressSegmentW: ms(42),
+  questionPhaseNudgeY: -20,
+  progressGapBelowQuestion: ms(12),
+  progressDashW: ms(24),
+  progressDotR: ms(3),
   progressSegmentH: ms(2.5),
-  progressSegmentGap: ms(9),
-  progressLabelGap: ms(10),
+  progressItemGap: ms(18),
   progressCelebrateMs: 220
 };
 
@@ -5478,10 +5483,6 @@ function posterDrawFrame(p) {
     platformW - POSTER_LAYOUT.marginX,
     POSTER_LAYOUT.headerLineY + POSTER_LAYOUT.headerNudgeY
   );
-
-  if (p.clickCount < cfg.finalClickCount) {
-    platformDrawQuestionProgress(p);
-  }
 }
 
 function posterDrawHeader(p) {
@@ -5520,6 +5521,7 @@ function posterDrawQuestionUI(p) {
       posterDrawChoicePanel(p, x, y, w, h, img, label, imgId, choice),
     cfg.choiceStages || platformChoiceStages
   );
+  platformDrawQuestionProgress(p);
 }
 
 function posterDrawChoicePanel(p, x, y, w, h, img, label, imgId, choice = {}) {
