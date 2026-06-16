@@ -494,6 +494,8 @@ function platformGetAnimatedTrianglePoints(index) {
 
 function platformDrawMainBackground() {
   noStroke();
+  rectMode(CORNER);
+  ellipseMode(CENTER);
 
   for (let y = 0; y < platformH; y++) {
     let t = map(y, 0, platformH, 0, 1);
@@ -852,7 +854,7 @@ function platformApplyViewportLayout() {
 
   platformText.introTitle.y = platformTuckRefY(110) + 20;
   platformText.introHint.y = platformTuckRefY(620) + 160;
-  platformText.questionTitle.y = platformTuckRefY(920);
+  platformText.questionTitle.y = platformTuckRefY(920) + POSTER_LAYOUT.questionPhaseNudgeY;
   POSTER_LAYOUT.headerLineY = platformTuckRefY(60) + 20;
   POSTER_LAYOUT.headerTextY = platformTuckRefY(34) + ms(5) + 20;
   POSTER_LAYOUT.choiceY =
@@ -4177,12 +4179,13 @@ function platformDrawQuad(hexColor, p1, p2, p3, p4, weight = 1.1) {
 
 function platformDrawVerticalGradient(bgTop, bgBottom) {
   noStroke();
+  rectMode(CORNER);
 
-  for (let y = 0; y < height; y++) {
-    let t = map(y, 0, height, 0, 1);
+  for (let y = 0; y < platformH; y++) {
+    let t = map(y, 0, platformH, 0, 1);
     let c = lerpColor(color(bgTop), color(bgBottom), t);
     fill(c);
-    rect(0, y, width, 1);
+    rect(0, y, platformW, 1);
   }
 }
 
@@ -4494,6 +4497,61 @@ function platformDrawQuestionTitle(textColor) {
   );
 }
 
+function platformGetQuestionStageCount(p) {
+  let stages = p.cfg.choiceStages || platformChoiceStages;
+  return stages.length;
+}
+
+function platformGetProgressBaseY() {
+  return (
+    platformText.questionTitle.y +
+    platformText.questionTitle.leading +
+    POSTER_LAYOUT.progressGapBelowQuestion
+  );
+}
+
+function platformDrawQuestionProgress(p) {
+  let cfg = p.cfg;
+  let total = platformGetQuestionStageCount(p);
+  if (total <= 0 || p.clickCount >= cfg.finalClickCount) {
+    return;
+  }
+
+  let dotR = POSTER_LAYOUT.progressDotR;
+  let dashW = POSTER_LAYOUT.progressDashW;
+  let dashH = POSTER_LAYOUT.progressSegmentH;
+  let itemGap = POSTER_LAYOUT.progressItemGap;
+  let trackSpan = max(0, total - 1) * itemGap;
+  let startCx = platformW / 2 - trackSpan / 2;
+  let y = platformGetProgressBaseY();
+  let markerY = y + dashH / 2;
+  let baseColor = color(cfg.textColor);
+  let currentIndex = constrain(p.clickCount, 0, total - 1);
+
+  push();
+  noStroke();
+  rectMode(CENTER);
+  ellipseMode(CENTER);
+
+  for (let i = 0; i < total; i++) {
+    let cx = startCx + i * itemGap;
+
+    if (i === currentIndex) {
+      let dashColor = color(baseColor);
+      dashColor.setAlpha(255);
+      fill(dashColor);
+      rect(cx, markerY, dashW, dashH, ms(1.5));
+    } else {
+      let dotColor = color(baseColor);
+      dotColor.setAlpha(POSTER_LAYOUT.progressDotAlpha);
+      fill(dotColor);
+      ellipse(cx, markerY, dotR * 2, dotR * 2);
+    }
+  }
+
+  pop();
+}
+
 function platformDrawTightWordText(str, x, y, leading, align = "center", wordGapScale = 0.58) {
   let lines = str.split("\n");
   let spaceW = textWidth(" ") * wordGapScale;
@@ -4562,7 +4620,14 @@ const POSTER_LAYOUT = {
   finalBodyLineCount: 7,
   finalCtaGap: ms(26),
   finalCtaH: ms(56),
-  frameStrokeWeight: 0.9
+  frameStrokeWeight: 0.9,
+  questionPhaseNudgeY: -20,
+  progressGapBelowQuestion: ms(12),
+  progressDashW: ms(24),
+  progressDotR: ms(3),
+  progressSegmentH: ms(2.5),
+  progressItemGap: ms(18),
+  progressDotAlpha: 72
 };
 
 function platformGetFinalBodyTopY() {
@@ -4819,8 +4884,7 @@ const posterRegistry = {
       text: "Smart everyday choices can help\nprotect vultures. Reducing waste,\nchoosing responsible products,\nand keeping nature clean can\nprevent harm to wildlife, protect\nfood chains, and help vulture\nsurvive across the Israeli skies."
     },
     feedback: { rgb: true, y: my(690) },
-    pipeline: ["clear", "bg", "animal", "question", "footer", "feedback", "frame", "header"],
-    clearColor: PLATFORM_BG_COLOR,
+    pipeline: ["bg", "animal", "question", "footer", "feedback", "frame", "header"],
     resetFinalOnCorrect: false,
     nextClickCount(stage) { return stage === 2 ? 4 : stage + 1; },
     randomSeed: 100,
@@ -5379,6 +5443,30 @@ function posterUpdateFinalTimer(p) {
 }
 
 function posterDrawBackground(p) {
+  let cfg = p.cfg;
+
+  if (cfg.bgTop && cfg.bgBottom) {
+    platformDrawVerticalGradient(cfg.bgTop, cfg.bgBottom);
+
+    if (cfg.glow) {
+      let g = cfg.glow;
+      platformDrawRadialGlow(
+        g.r,
+        g.g,
+        g.b,
+        platformW / 2,
+        g.cy,
+        g.maxR,
+        g.step,
+        g.maxA,
+        g.ws,
+        g.hs
+      );
+    }
+
+    return;
+  }
+
   platformDrawMainBackground();
 }
 
@@ -5422,6 +5510,7 @@ function posterDrawQuestionUI(p) {
   }
 
   platformDrawQuestionTitle(cfg.textColor);
+  platformDrawQuestionProgress(p);
   platformDrawStageChoices(
     p.clickCount,
     p.leftBox,
