@@ -4544,7 +4544,7 @@ const POSTER_LAYOUT = {
   headerNudgeY: -60,
   finalFooterNudgeY: -60,
   finalPosterNudgeY: -80,
-  feedbackNudgeY: -15,
+  feedbackNudgeY: -25,
   choiceW: ms(168),
   choiceH: ms(168),
   choiceY: platformText.questionTitle.y - ms(168) - ms(45),
