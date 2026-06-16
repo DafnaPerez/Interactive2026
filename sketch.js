@@ -19,8 +19,8 @@ let platformPosterFadeColor = null;
 
 let platformLoadingTargetAnimal = null;
 let platformLoadingStartTime = null;
-const PLATFORM_LOADING_HOLD_MS = 1000;
-const PLATFORM_LOADING_MORPH_MS = 450;
+const PLATFORM_LOADING_HOLD_MS = 450;
+const PLATFORM_LOADING_MORPH_MS = 280;
 const PLATFORM_LOADING_TOTAL_MS = 7000;
 
 // Original poster art/layout reference (650×975)
@@ -54,10 +54,10 @@ const ANIMAL_ANCHOR_Y = 400;
 const ANIMAL_SCREEN_OFFSET_Y = 50;
 const DEER_HYENA_EXTRA_SCREEN_OFFSET_Y = 20;
 const INTRO_TRIANGLES_OFFSET_Y = -50;
-const PLATFORM_LOADING_TRIANGLE_SIZE = mx(118);
+const PLATFORM_LOADING_TRIANGLE_SIZE = mx(72);
 
 function platformGetLoadingTriangleCy() {
-  return my(330) + INTRO_TRIANGLES_OFFSET_Y;
+  return my(420) + INTRO_TRIANGLES_OFFSET_Y + 25;
 }
 
 function platformScreenPxToAnimalRefY(screenPx) {
@@ -673,7 +673,7 @@ function platformGetLoadingMorphState(elapsed) {
   let morphT =
     segmentT < PLATFORM_LOADING_HOLD_MS
       ? 0
-      : platformEaseInOutSine(
+      : platformEaseOutCubic(
           (segmentT - PLATFORM_LOADING_HOLD_MS) / PLATFORM_LOADING_MORPH_MS
         );
 
@@ -690,7 +690,7 @@ function platformGetIntroGrungeFont() {
   );
 }
 
-function platformDrawLoadingTriangle(morph, breathe = 0) {
+function platformDrawLoadingTriangle(morph) {
   let fromPts = platformNormalizeTriangleVerts(
     platformGetLoadingTriangleRefPts(morph.fromIndex),
     platformW / 2,
@@ -707,28 +707,14 @@ function platformDrawLoadingTriangle(morph, breathe = 0) {
   let fromColor = color(platformAnimals[morph.fromIndex].color);
   let toColor = color(platformAnimals[morph.toIndex].color);
   let triColor = lerpColor(fromColor, toColor, morph.morphT);
-  let holdPulse =
-    morph.morphT < 0.001
-      ? 1 + sin((morph.segmentT / PLATFORM_LOADING_HOLD_MS) * TWO_PI) * 0.018
-      : 1;
-  let morphLift = sin(morph.morphT * PI) * 0.035;
-  let triScale = holdPulse + morphLift + breathe;
-
-  let cx = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
-  let cy = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
 
   noStroke();
-  push();
-  translate(cx, cy);
-  scale(triScale);
-  translate(-cx, -cy);
   fill(triColor);
   triangle(
     pts[0][0], pts[0][1],
     pts[1][0], pts[1][1],
     pts[2][0], pts[2][1]
   );
-  pop();
 }
 
 function platformBeginAnimalFromLoading() {
@@ -766,8 +752,7 @@ function platformDrawLoading() {
   platformDrawMainBackground();
 
   let morph = platformGetLoadingMorphState(elapsed);
-  let breathe = sin(elapsed * 0.0045) * 0.01;
-  platformDrawLoadingTriangle(morph, breathe);
+  platformDrawLoadingTriangle(morph);
 
   let introFont = platformGetIntroGrungeFont();
   if (introFont) {
