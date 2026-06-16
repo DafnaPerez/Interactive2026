@@ -4231,7 +4231,6 @@ function platformLoadSharedPosterAssets() {
     garbageFloorImg: loadImage("garbage_floor.png"),
     cigaretteAshtrayImg: loadImage("cigarette_ashtray.png"),
     cigaretteOnlyImg: loadImage("cigarette_only.png"),
-    cigaretteShaddowImg: loadImage("cigarette_shaddow.png"),
     sandwichBoxImg: loadImage("sandwich_box.png"),
     sandwichPlasticImg: loadImage("sandwich_plastic.png"),
     glassCupImg: loadImage("glass_cup.png"),
@@ -4798,12 +4797,7 @@ const posterRegistry = {
         correctSide: "left"
       },
       {
-        left: {
-          img: "cigaretteOnly",
-          overlayImg: "cigaretteShaddow",
-          overlayBlendMode: "multiply",
-          label: "On the floor"
-        },
+        left: { img: "cigaretteOnly", label: "On the floor" },
         right: { img: "cigaretteAshtray", label: "In the ashtray" }
       }
     ],
@@ -5007,12 +5001,7 @@ const posterRegistry = {
         correctSide: "left"
       },
       {
-        left: {
-          img: "cigaretteOnly",
-          overlayImg: "cigaretteShaddow",
-          overlayBlendMode: "multiply",
-          label: "On the floor"
-        },
+        left: { img: "cigaretteOnly", label: "On the floor" },
         right: { img: "cigaretteAshtray", label: "In the ashtray" }
       },
       {
@@ -5325,7 +5314,6 @@ function posterPreload(id, assets) {
     garbageFloor: assets.garbageFloorImg,
     cigaretteAshtray: assets.cigaretteAshtrayImg,
     cigaretteOnly: assets.cigaretteOnlyImg,
-    cigaretteShaddow: assets.cigaretteShaddowImg,
     sandwichBox: assets.sandwichBoxImg,
     sandwichPlastic: assets.sandwichPlasticImg,
     glassCup: assets.glassCupImg,
