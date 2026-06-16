@@ -5443,30 +5443,6 @@ function posterUpdateFinalTimer(p) {
 }
 
 function posterDrawBackground(p) {
-  let cfg = p.cfg;
-
-  if (cfg.bgTop && cfg.bgBottom) {
-    platformDrawVerticalGradient(cfg.bgTop, cfg.bgBottom);
-
-    if (cfg.glow) {
-      let g = cfg.glow;
-      platformDrawRadialGlow(
-        g.r,
-        g.g,
-        g.b,
-        platformW / 2,
-        g.cy,
-        g.maxR,
-        g.step,
-        g.maxA,
-        g.ws,
-        g.hs
-      );
-    }
-
-    return;
-  }
-
   platformDrawMainBackground();
 }
 
