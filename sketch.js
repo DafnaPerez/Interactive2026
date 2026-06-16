@@ -291,7 +291,7 @@ function platformGetFinalCtaLayout(p) {
   let cfg = p.cfg;
   let bodySize = ms(17);
   let bodyLeading = ms(20);
-  let bodyY = platformGetFinalBodyTopY() + POSTER_LAYOUT.finalContentYOffset + POSTER_LAYOUT.finalFooterNudgeY;
+  let bodyY = platformGetFinalBodyTopY() + POSTER_LAYOUT.finalContentYOffset;
   let bodyLineCount = cfg.finalBody.text.split("\n").length;
   let actualBodyBlockH = (bodyLineCount - 1) * bodyLeading + bodySize;
   let referenceBodyBlockH =
@@ -5483,7 +5483,7 @@ function posterDrawFinalMessage(p, alphaOverride = null) {
   textLeading(bodyLeading);
   let bodyBlockH =
     (POSTER_LAYOUT.finalBodyLineCount - 1) * bodyLeading + bodySize;
-  let bodyY = platformGetFinalBodyTopY() + POSTER_LAYOUT.finalContentYOffset + POSTER_LAYOUT.finalFooterNudgeY;
+  let bodyY = platformGetFinalBodyTopY() + POSTER_LAYOUT.finalContentYOffset;
   let bodyX = POSTER_LAYOUT.finalBodyX + POSTER_LAYOUT.finalBodyXOffset;
 
   textSize(platformText.finalTitle.size);
