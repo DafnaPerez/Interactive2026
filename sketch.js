@@ -125,7 +125,7 @@ const platformText = {
 
   choiceLabel: {
     size: ms(14),
-    alpha: 180,
+    alpha: 255,
     yOffset: ms(10)
   },
 
@@ -4333,7 +4333,8 @@ function platformGetChoiceImageVisualOffset(img) {
 }
 
 const platformChoiceImageTweaks = {
-  fabricBag: { offsetY: 3 },
+  plasticBag: { maxSizeScale: 0.9 },
+  fabricBag: { maxSizeScale: 0.9, offsetY: 3 },
   garbageBin: { maxSizeScale: 0.85 },
   sandwichPlastic: { maxSizeScale: 0.85, offsetY: -2 },
   glassCup: { maxSizeScale: 0.85 },
