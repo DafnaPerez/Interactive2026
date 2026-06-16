@@ -853,8 +853,8 @@ function platformApplyViewportLayout() {
   platformText.introTitle.y = platformTuckRefY(110) + 20;
   platformText.introHint.y = platformTuckRefY(620) + 160;
   platformText.questionTitle.y = platformTuckRefY(920);
-  POSTER_LAYOUT.headerLineY = platformTuckRefY(60) + 20;
-  POSTER_LAYOUT.headerTextY = platformTuckRefY(34) + ms(5) + 20;
+  POSTER_LAYOUT.headerLineY = platformTuckRefY(60) + 20 - 60;
+  POSTER_LAYOUT.headerTextY = platformTuckRefY(34) + ms(5) + 20 - 60;
   POSTER_LAYOUT.choiceY =
     platformText.questionTitle.y - ms(168) - ms(45);
 
@@ -4538,9 +4538,9 @@ function platformDrawTightWordText(str, x, y, leading, align = "center", wordGap
 
 const POSTER_LAYOUT = {
   marginX: mx(34),
-  headerLineY: my(60) + 20,
+  headerLineY: my(60) + 20 - 60,
   headerTextX: mx(40),
-  headerTextY: my(34) + ms(5) + 20,
+  headerTextY: my(34) + ms(5) + 20 - 60,
   choiceW: ms(168),
   choiceH: ms(168),
   choiceY: platformText.questionTitle.y - ms(168) - ms(45),
@@ -5519,7 +5519,7 @@ function posterDrawFeedback(p) {
   textAlign(CENTER, CENTER);
   textSize(ms(20));
   textStyle(NORMAL);
-  text(p.feedback.text, platformW / 2, fb.y + 40);
+  text(p.feedback.text, platformW / 2, fb.y + 25);
 }
 
 function posterDrawFooter(p) {
@@ -5545,7 +5545,7 @@ function posterDrawFooter(p) {
   platformDrawTightWordText(
     cfg.finalFooter.text,
     platformText.questionTitle.x,
-    platformText.introTitle.y,
+    platformText.introTitle.y - 60,
     platformText.finalFooter.leading
   );
 }
