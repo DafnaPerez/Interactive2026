@@ -291,7 +291,7 @@ function platformGetFinalCtaLayout(p) {
   let cfg = p.cfg;
   let bodySize = ms(17);
   let bodyLeading = ms(20);
-  let bodyY = platformGetFinalBodyTopY() + POSTER_LAYOUT.finalContentYOffset;
+  let bodyY = platformGetFinalBodyTopY() + POSTER_LAYOUT.finalContentYOffset + POSTER_LAYOUT.finalPosterNudgeY;
   let bodyLineCount = cfg.finalBody.text.split("\n").length;
   let actualBodyBlockH = (bodyLineCount - 1) * bodyLeading + bodySize;
   let referenceBodyBlockH =
@@ -4543,6 +4543,7 @@ const POSTER_LAYOUT = {
   headerTextY: my(34) + ms(5) + 20,
   headerNudgeY: -60,
   finalFooterNudgeY: -60,
+  finalPosterNudgeY: -80,
   feedbackNudgeY: -15,
   choiceW: ms(168),
   choiceH: ms(168),
@@ -5483,7 +5484,7 @@ function posterDrawFinalMessage(p, alphaOverride = null) {
   textLeading(bodyLeading);
   let bodyBlockH =
     (POSTER_LAYOUT.finalBodyLineCount - 1) * bodyLeading + bodySize;
-  let bodyY = platformGetFinalBodyTopY() + POSTER_LAYOUT.finalContentYOffset;
+  let bodyY = platformGetFinalBodyTopY() + POSTER_LAYOUT.finalContentYOffset + POSTER_LAYOUT.finalPosterNudgeY;
   let bodyX = POSTER_LAYOUT.finalBodyX + POSTER_LAYOUT.finalBodyXOffset;
 
   textSize(platformText.finalTitle.size);
@@ -5553,7 +5554,7 @@ function posterDrawFooter(p) {
   platformDrawTightWordText(
     cfg.finalFooter.text,
     platformText.questionTitle.x,
-    platformText.introTitle.y + POSTER_LAYOUT.finalFooterNudgeY,
+    platformText.introTitle.y + POSTER_LAYOUT.finalFooterNudgeY + POSTER_LAYOUT.finalPosterNudgeY,
     platformText.finalFooter.leading
   );
 }
