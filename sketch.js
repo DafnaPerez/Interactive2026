@@ -29,7 +29,6 @@ const PLATFORM_SHARE_FADE_MS = 260;
 let platformShareWhatsappLogo = null;
 let platformShareInstagramLogo = null;
 let platformShareFacebookLogo = null;
-let platformShareLogoDisplay = null;
 
 function platformShareAnimFrame() {
   return platformSharePreviewStill ? platformShareFrozenFrame : frameCount;
@@ -283,7 +282,7 @@ function preload() {
 }
 
 function platformApplyCanvasSize() {
-  pixelDensity(min(2, displayDensity()));
+  pixelDensity(displayDensity());
   resizeCanvas(platformW, platformH);
   platformApplyViewportLayout();
 }
@@ -307,7 +306,7 @@ function platformApplyStartupQuery() {
 }
 
 function setup() {
-  pixelDensity(min(2, displayDensity()));
+  pixelDensity(displayDensity());
   let cnv = createCanvas(platformW, platformH);
   let mainEl = document.querySelector("main");
 
@@ -318,7 +317,6 @@ function setup() {
   platformCanvasReady = true;
   platformBindViewportListeners();
   platformApplyViewportLayout();
-  platformBakeShareLogos();
   platformApplyStartupQuery();
 }
 
@@ -693,7 +691,7 @@ function platformGetShareOverlayLayout(p) {
   let bodyBlockH = bodyLeading * 2;
   let textTop = cardY + pad + ms(4);
   let previewY = textTop + titleBlockH + bodyBlockH + ms(8);
-  let iconR = ms(26);
+  let iconR = ms(22);
   let iconHit = iconR * 2 + ms(10);
   let backH = ms(34);
   let iconsRowH = iconHit;
@@ -756,7 +754,7 @@ function platformGetShareOverlayLayout(p) {
   };
 }
 
-function platformGetShareLogoSource(kind) {
+function platformGetShareLogo(kind) {
   switch (kind) {
     case "whatsapp":
       return platformShareWhatsappLogo;
@@ -769,73 +767,25 @@ function platformGetShareLogoSource(kind) {
   }
 }
 
-function platformBakeShareLogos() {
-  let logicalD = round(ms(52));
-  let px = round(logicalD * pixelDensity());
-  if (platformShareLogoDisplay && platformShareLogoDisplay._px === px) {
-    return;
-  }
-
-  let sources = {
-    whatsapp: platformShareWhatsappLogo,
-    instagram: platformShareInstagramLogo,
-    facebook: platformShareFacebookLogo
-  };
-  let baked = { _logicalD: logicalD, _px: px };
-  let count = 0;
-
-  for (let kind in sources) {
-    let src = sources[kind];
-    if (!src || src.width <= 0) {
-      continue;
-    }
-
-    let pg = createGraphics(px, px);
-    pg.pixelDensity(1);
-    pg.drawingContext.imageSmoothingEnabled = true;
-    pg.drawingContext.imageSmoothingQuality = "high";
-    pg.image(src, 0, 0, px, px);
-    baked[kind] = pg.get(0, 0, px, px);
-    count++;
-  }
-
-  if (count > 0) {
-    platformShareLogoDisplay = baked;
-  }
-}
-
-function platformGetShareLogo(kind) {
-  if (platformShareLogoDisplay && platformShareLogoDisplay[kind]) {
-    return platformShareLogoDisplay[kind];
-  }
-  return platformGetShareLogoSource(kind);
-}
-
 function platformDrawShareOptionButton(box, alpha, hover, iconR) {
   let img = platformGetShareLogo(box.kind);
   if (!img || img.width <= 0) {
     return;
   }
 
-  let d = platformShareLogoDisplay?._logicalD || round(iconR * 2);
-  let cx = round(box.x + box.w / 2);
-  let cy = round(box.y + box.h / 2);
-  let s = hover ? 1.04 : 1;
-
   push();
+  let s = hover ? 1.04 : 1;
+  let cx = box.x + box.w / 2;
+  let cy = box.y + box.h / 2;
+  translate(cx, cy);
+  scale(s);
   drawingContext.imageSmoothingEnabled = true;
   drawingContext.imageSmoothingQuality = "high";
-  translate(cx, cy);
-  if (s !== 1) {
-    scale(s);
-  }
   imageMode(CENTER);
   noTint();
-  image(img, 0, 0, d, d);
+  image(img, 0, 0, iconR * 2, iconR * 2);
   pop();
-
   imageMode(CORNER);
-  noTint();
 }
 
 function platformDrawShareCardBackground(card) {
