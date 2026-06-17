@@ -282,7 +282,7 @@ function preload() {
 }
 
 function platformApplyCanvasSize() {
-  pixelDensity(displayDensity());
+  pixelDensity(min(2, displayDensity()));
   resizeCanvas(platformW, platformH);
   platformApplyViewportLayout();
 }
@@ -306,7 +306,7 @@ function platformApplyStartupQuery() {
 }
 
 function setup() {
-  pixelDensity(displayDensity());
+  pixelDensity(min(2, displayDensity()));
   let cnv = createCanvas(platformW, platformH);
   let mainEl = document.querySelector("main");
 
@@ -1528,11 +1528,16 @@ function platformGetViewportSize() {
     return { w: platformW, h: platformH };
   }
 
+  if (window.visualViewport) {
+    return {
+      w: window.visualViewport.width,
+      h: window.visualViewport.height
+    };
+  }
+
   return { w: window.innerWidth, h: window.innerHeight };
 }
 
-const PLATFORM_LAYOUT_Y_ANCHOR = REF_H * 0.52;
-const PLATFORM_LAYOUT_Y_TIGHTEN_MIN = 0.84;
 const PLATFORM_FEEDBACK_REF_Y = {
   turtle: 690,
   eagle: 690,
@@ -1541,29 +1546,15 @@ const PLATFORM_FEEDBACK_REF_Y = {
   hyena: 700
 };
 
-function platformGetLayoutYTighten() {
-  let vp = platformGetViewportSize();
-  let scaleW = vp.w / platformW;
-  let scaleH = vp.h / platformH;
-  if (scaleH >= scaleW * 0.98) {
-    return 1;
-  }
-  return constrain(scaleH / scaleW, PLATFORM_LAYOUT_Y_TIGHTEN_MIN, 1);
-}
-
 function platformTuckRefY(refY) {
-  let tighten = platformGetLayoutYTighten();
-  if (tighten >= 0.999) {
-    return my(refY);
-  }
-  let tuckedRef =
-    PLATFORM_LAYOUT_Y_ANCHOR + (refY - PLATFORM_LAYOUT_Y_ANCHOR) * tighten;
-  return my(tuckedRef);
+  return my(refY);
 }
 
 function platformUpdateViewportFit() {
   let vp = platformGetViewportSize();
-  platformScreenScale = max(vp.w / platformW, vp.h / platformH);
+  // "Contain" keeps the full poster visible on every screen size.
+  // (The old "cover" max() scale filled the screen but cropped edges.)
+  platformScreenScale = min(vp.w / platformW, vp.h / platformH);
 }
 
 function platformApplyViewportLayout() {
