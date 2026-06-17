@@ -1528,14 +1528,16 @@ function platformGetViewportSize() {
     return { w: platformW, h: platformH };
   }
 
+  let w = window.innerWidth;
+  let h = window.innerHeight;
+
   if (window.visualViewport) {
-    return {
-      w: window.visualViewport.width,
-      h: window.visualViewport.height
-    };
+    let vv = window.visualViewport;
+    w = vv.width;
+    h = min(vv.height, h);
   }
 
-  return { w: window.innerWidth, h: window.innerHeight };
+  return { w, h };
 }
 
 const PLATFORM_LAYOUT_Y_ANCHOR = REF_H * 0.52;
@@ -1626,11 +1628,19 @@ function platformFitCanvasToScreen() {
   cnv.style.width = cssW + "px";
   cnv.style.height = cssH + "px";
   cnv.style.display = "block";
-  cnv.style.position = "absolute";
-  cnv.style.left = "50%";
-  cnv.style.top = "50%";
-  cnv.style.transform = "translate(-50%, -50%)";
+  cnv.style.position = "fixed";
   cnv.style.margin = "0";
+  cnv.style.transform = "none";
+
+  if (typeof window !== "undefined" && window.visualViewport) {
+    let vv = window.visualViewport;
+    cnv.style.left = vv.offsetLeft + (vv.width - cssW) / 2 + "px";
+    cnv.style.top = vv.offsetTop + (vv.height - cssH) / 2 + "px";
+  } else {
+    cnv.style.left = "50%";
+    cnv.style.top = "50%";
+    cnv.style.transform = "translate(-50%, -50%)";
+  }
 }
 
 
