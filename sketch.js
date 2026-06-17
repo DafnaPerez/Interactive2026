@@ -698,7 +698,7 @@ function platformGetShareOverlayLayout(p) {
   let previewH = cardH - (previewY - cardY) - pad - iconsRowH - backH - ms(16);
   let previewW = cardW - pad * 2;
   let previewX = cardX + pad;
-  let iconsY = previewY + previewH + ms(12) + iconHit * 0.5;
+  let iconsY = previewY + previewH + ms(2) + iconHit * 0.5;
   let backY = iconsY + iconHit * 0.5 + ms(10);
   let iconCenters = [
     cardX + cardW * 0.38,
