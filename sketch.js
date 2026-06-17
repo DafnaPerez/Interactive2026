@@ -801,8 +801,7 @@ function platformDrawLoading() {
     textFont(introFont);
   }
 
-  let hintAlpha = constrain(map(elapsed, 300, 900, 0, 255), 0, 255);
-  fill(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], hintAlpha);
+  fill(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 255);
   textStyle(NORMAL);
 
   let hintSize = platformText.loadingHint.size;
@@ -934,9 +933,16 @@ function platformTriggerCorrectFeedback(animalId) {
   p.feedback.timer = 0;
 }
 
+function platformVibrateWrongAnswer() {
+  if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+    navigator.vibrate([35, 25, 35, 25, 35, 25, 35]);
+  }
+}
+
 function platformTriggerWrongFeedback(animalId, side) {
   let p = posterRegistry[animalId];
   if (!p) return;
+  platformVibrateWrongAnswer();
   p.pulse.positive = 0;
   p.pulse.wrongSide = side;
   p.pulse.wrongShake = 16;
