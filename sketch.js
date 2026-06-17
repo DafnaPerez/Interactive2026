@@ -29,6 +29,8 @@ const PLATFORM_SHARE_FADE_MS = 260;
 let platformShareWhatsappLogo = null;
 let platformShareInstagramLogo = null;
 let platformShareFacebookLogo = null;
+let platformShareLogoCache = {};
+let platformShareLogoCachePx = 0;
 
 function platformShareAnimFrame() {
   return platformSharePreviewStill ? platformShareFrozenFrame : frameCount;
@@ -691,7 +693,7 @@ function platformGetShareOverlayLayout(p) {
   let bodyBlockH = bodyLeading * 2;
   let textTop = cardY + pad + ms(4);
   let previewY = textTop + titleBlockH + bodyBlockH + ms(8);
-  let iconR = ms(22);
+  let iconR = ms(24);
   let iconHit = iconR * 2 + ms(10);
   let backH = ms(34);
   let iconsRowH = iconHit;
@@ -754,7 +756,7 @@ function platformGetShareOverlayLayout(p) {
   };
 }
 
-function platformGetShareLogo(kind) {
+function platformGetShareLogoSource(kind) {
   switch (kind) {
     case "whatsapp":
       return platformShareWhatsappLogo;
@@ -767,27 +769,64 @@ function platformGetShareLogo(kind) {
   }
 }
 
-function platformDrawShareOptionButton(box, alpha, hover, iconR) {
-  push();
-  let s = hover ? 1.04 : 1;
-  let cx = box.x + box.w / 2;
-  let cy = box.y + box.h / 2;
-  translate(cx, cy);
-  scale(s);
+function platformPrepareShareLogos(displayLogicalPx) {
+  let logicalD = round(displayLogicalPx);
+  let cachePx = round(logicalD * pixelDensity());
+  if (platformShareLogoCachePx === cachePx) {
+    return;
+  }
 
-  let d = iconR * 2;
-  noStroke();
-  let bg = color(box.accent);
-  bg.setAlpha(alpha);
-  fill(bg);
-  ellipse(0, 0, d, d);
+  platformShareLogoCachePx = cachePx;
+  platformShareLogoCache = {};
+
+  let kinds = ["whatsapp", "instagram", "facebook"];
+  for (let i = 0; i < kinds.length; i++) {
+    let kind = kinds[i];
+    let src = platformGetShareLogoSource(kind);
+    if (!src || src.width <= 0) {
+      continue;
+    }
+
+    let pg = createGraphics(cachePx, cachePx);
+    pg.pixelDensity(1);
+    pg.drawingContext.imageSmoothingEnabled = true;
+    pg.drawingContext.imageSmoothingQuality = "high";
+    pg.image(src, 0, 0, cachePx, cachePx);
+    platformShareLogoCache[kind] = pg.get(0, 0, cachePx, cachePx);
+    pg.remove();
+  }
+}
+
+function platformGetShareLogo(kind) {
+  return platformShareLogoCache[kind] || null;
+}
+
+function platformDrawShareOptionButton(box, alpha, hover, iconR) {
+  let d = round(iconR * 2);
+  platformPrepareShareLogos(d);
 
   let img = platformGetShareLogo(box.kind);
-  if (img && img.width > 0) {
-    imageMode(CENTER);
-    noTint();
-    image(img, 0, 0, d, d);
+  if (!img || img.width <= 0) {
+    return;
   }
+
+  push();
+  let cx = round(box.x + box.w / 2);
+  let cy = round(box.y + box.h / 2);
+  let s = hover ? 1.04 : 1;
+  let ctx = drawingContext;
+
+  ctx.save();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  translate(cx, cy);
+  if (s !== 1) {
+    scale(s);
+  }
+  imageMode(CENTER);
+  noTint();
+  image(img, 0, 0, d, d);
+  ctx.restore();
 
   pop();
   imageMode(CORNER);
