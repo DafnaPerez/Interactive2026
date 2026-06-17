@@ -195,7 +195,7 @@ const platformText = {
     x: platformW / 2,
     y: my(560),
     size: ms(17),
-    leading: ms(20),
+    leading: ms(24),
     wordGapScale: 0.72
   },
 
