@@ -26,6 +26,9 @@ let platformSharePreviewCapturePending = false;
 let platformSharePreviewStill = false;
 let platformShareFrozenFrame = 0;
 const PLATFORM_SHARE_FADE_MS = 260;
+let platformShareWhatsappLogo = null;
+let platformShareInstagramLogo = null;
+let platformShareFacebookLogo = null;
 
 function platformShareAnimFrame() {
   return platformSharePreviewStill ? platformShareFrozenFrame : frameCount;
@@ -230,7 +233,7 @@ const platformText = {
     facebook: "Facebook",
     copied: "Link copied — paste in Instagram",
     close: "Not now",
-    back: "Back to main screen"
+    back: "try another animal >>"
   }
 };
 
@@ -265,6 +268,9 @@ const platformAnimals = [
 
 function preload() {
   posterPreloadAll();
+  platformShareWhatsappLogo = loadImage("whatsapp_logo.png");
+  platformShareInstagramLogo = loadImage("instagram_logo.png");
+  platformShareFacebookLogo = loadImage("facebook_logo.png");
 }
 
 function platformApplyCanvasSize() {
@@ -670,10 +676,10 @@ function platformGetShareOverlayLayout(p) {
 
   let pad = ms(18);
   let closeSize = ms(28);
-  let titleSize = ms(20);
-  let bodySize = ms(13);
-  let bodyLeading = ms(16);
-  let titleBlockH = titleSize + ms(4);
+  let titleSize = platformText.finalCta.size;
+  let bodySize = ms(17);
+  let bodyLeading = ms(22);
+  let titleBlockH = titleSize + ms(6);
   let bodyBlockH = bodyLeading * 2;
   let textTop = cardY + pad + ms(4);
   let previewY = textTop + titleBlockH + bodyBlockH + ms(8);
@@ -681,15 +687,15 @@ function platformGetShareOverlayLayout(p) {
   let iconHit = iconR * 2 + ms(10);
   let backH = ms(34);
   let iconsRowH = iconHit;
-  let previewH = cardH - (previewY - cardY) - pad - iconsRowH - backH - ms(28);
+  let previewH = cardH - (previewY - cardY) - pad - iconsRowH - backH - ms(16);
   let previewW = cardW - pad * 2;
   let previewX = cardX + pad;
-  let iconsY = previewY + previewH + ms(14) + iconHit * 0.5;
-  let backY = iconsY + iconHit * 0.5 + ms(14);
+  let iconsY = previewY + previewH + ms(4) + iconHit * 0.5;
+  let backY = iconsY + iconHit * 0.5 + ms(10);
   let iconCenters = [
-    cardX + cardW * 0.25,
+    cardX + cardW * 0.38,
     cardX + cardW * 0.5,
-    cardX + cardW * 0.75
+    cardX + cardW * 0.62
   ];
 
   function iconBox(cx) {
@@ -740,6 +746,19 @@ function platformGetShareOverlayLayout(p) {
   };
 }
 
+function platformGetShareLogo(kind) {
+  switch (kind) {
+    case "whatsapp":
+      return platformShareWhatsappLogo;
+    case "instagram":
+      return platformShareInstagramLogo;
+    case "facebook":
+      return platformShareFacebookLogo;
+    default:
+      return null;
+  }
+}
+
 function platformDrawShareOptionButton(box, alpha, hover, iconR) {
   push();
   let s = hover ? 1.04 : 1;
@@ -747,20 +766,22 @@ function platformDrawShareOptionButton(box, alpha, hover, iconR) {
   let cy = box.y + box.h / 2;
   translate(cx, cy);
   scale(s);
-  noStroke();
-  let c = color(box.accent);
-  c.setAlpha(alpha);
-  fill(c);
-  ellipse(0, 0, iconR * 2, iconR * 2);
 
-  platformApplyGrungeFont(posterRegistry[platformMode]?.grungeFont);
-  fill(255, alpha);
-  textAlign(CENTER, CENTER);
-  textStyle(BOLD);
-  let iconText = box.kind === "whatsapp" ? "W" : box.kind === "instagram" ? "Ig" : "f";
-  textSize(ms(16));
-  text(iconText, 0, ms(1));
-  textStyle(NORMAL);
+  let img = platformGetShareLogo(box.kind);
+  let d = iconR * 2;
+  if (img && img.width > 0) {
+    imageMode(CENTER);
+    tint(255, alpha);
+    image(img, 0, 0, d, d);
+    noTint();
+  } else {
+    noStroke();
+    let c = color(box.accent);
+    c.setAlpha(alpha);
+    fill(c);
+    ellipse(0, 0, d, d);
+  }
+
   pop();
 }
 
@@ -893,26 +914,15 @@ function platformDrawShareOverlay() {
     mouseX < layout.back.x + layout.back.w &&
     mouseY > layout.back.y &&
     mouseY < layout.back.y + layout.back.h;
-  ink.setAlpha(255);
+  ink.setAlpha(backHover ? 220 : 255);
   fill(ink);
   textAlign(CENTER, CENTER);
-  textSize(ms(16));
+  textSize(layout.bodySize);
   text(
     platformText.share.back,
     layout.back.x + layout.back.w / 2,
     layout.back.y + layout.back.h / 2
   );
-  if (backHover) {
-    stroke(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 70);
-    strokeWeight(1);
-    line(
-      layout.back.x + ms(28),
-      layout.back.y + layout.back.h - ms(10),
-      layout.back.x + layout.back.w - ms(28),
-      layout.back.y + layout.back.h - ms(10)
-    );
-    noStroke();
-  }
 
   ink.setAlpha(hoverClose ? 220 : 140);
   fill(ink);
