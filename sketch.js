@@ -29,8 +29,6 @@ const PLATFORM_SHARE_FADE_MS = 260;
 let platformShareWhatsappLogo = null;
 let platformShareInstagramLogo = null;
 let platformShareFacebookLogo = null;
-let platformShareLogoCache = {};
-let platformShareLogoCachePx = 0;
 
 function platformShareAnimFrame() {
   return platformSharePreviewStill ? platformShareFrozenFrame : frameCount;
@@ -756,7 +754,7 @@ function platformGetShareOverlayLayout(p) {
   };
 }
 
-function platformGetShareLogoSource(kind) {
+function platformGetShareLogo(kind) {
   switch (kind) {
     case "whatsapp":
       return platformShareWhatsappLogo;
@@ -769,56 +767,20 @@ function platformGetShareLogoSource(kind) {
   }
 }
 
-function platformPrepareShareLogos(displayLogicalPx) {
-  let logicalD = round(displayLogicalPx);
-  let cachePx = round(logicalD * pixelDensity());
-  if (platformShareLogoCachePx === cachePx) {
-    return;
-  }
-
-  platformShareLogoCachePx = cachePx;
-  platformShareLogoCache = {};
-
-  let kinds = ["whatsapp", "instagram", "facebook"];
-  for (let i = 0; i < kinds.length; i++) {
-    let kind = kinds[i];
-    let src = platformGetShareLogoSource(kind);
-    if (!src || src.width <= 0) {
-      continue;
-    }
-
-    let pg = createGraphics(cachePx, cachePx);
-    pg.pixelDensity(1);
-    pg.drawingContext.imageSmoothingEnabled = true;
-    pg.drawingContext.imageSmoothingQuality = "high";
-    pg.image(src, 0, 0, cachePx, cachePx);
-    platformShareLogoCache[kind] = pg.get(0, 0, cachePx, cachePx);
-    pg.remove();
-  }
-}
-
-function platformGetShareLogo(kind) {
-  return platformShareLogoCache[kind] || null;
-}
-
 function platformDrawShareOptionButton(box, alpha, hover, iconR) {
-  let d = round(iconR * 2);
-  platformPrepareShareLogos(d);
-
   let img = platformGetShareLogo(box.kind);
   if (!img || img.width <= 0) {
     return;
   }
 
-  push();
+  let d = round(iconR * 2);
   let cx = round(box.x + box.w / 2);
   let cy = round(box.y + box.h / 2);
   let s = hover ? 1.04 : 1;
-  let ctx = drawingContext;
 
-  ctx.save();
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
+  push();
+  drawingContext.imageSmoothingEnabled = true;
+  drawingContext.imageSmoothingQuality = "high";
   translate(cx, cy);
   if (s !== 1) {
     scale(s);
@@ -826,9 +788,8 @@ function platformDrawShareOptionButton(box, alpha, hover, iconR) {
   imageMode(CENTER);
   noTint();
   image(img, 0, 0, d, d);
-  ctx.restore();
-
   pop();
+
   imageMode(CORNER);
   noTint();
 }
