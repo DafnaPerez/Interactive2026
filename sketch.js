@@ -195,7 +195,8 @@ const platformText = {
     x: platformW / 2,
     y: my(560),
     size: ms(17),
-    leading: ms(20)
+    leading: ms(20),
+    wordGapScale: 0.72
   },
 
   questionTitle: {
@@ -234,7 +235,7 @@ const platformText = {
 
   share: {
     title: "Share this poster",
-    body: "Help friends discover how everyday choices\nprotect wildlife.",
+    body: "Help friends discover how everyday choices can protect\nthe israeli wildlife.",
     whatsapp: "WhatsApp",
     instagram: "Instagram",
     facebook: "Facebook",
@@ -1326,9 +1327,14 @@ function platformDrawLoading() {
 
   let hintSize = platformText.loadingHint.size;
   let hintLeading = platformText.loadingHint.leading;
+  let hintWordGap = platformText.loadingHint.wordGapScale;
   let hintMaxW = platformW - mx(34) * 2;
   textSize(hintSize);
-  let hintLines = platformWrapTextLines(platformText.loadingHint.text, hintMaxW);
+  let hintLines = platformWrapTextLines(
+    platformText.loadingHint.text,
+    hintMaxW,
+    hintWordGap
+  );
   let hintBlockH = (hintLines.length - 1) * hintLeading + hintSize;
   let hintY = (platformH - hintBlockH) / 2;
 
@@ -1337,7 +1343,8 @@ function platformDrawLoading() {
     platformW / 2,
     hintY,
     hintMaxW,
-    hintLeading
+    hintLeading,
+    hintWordGap
   );
 
   platformDrawPosterFadeOverlay();
@@ -5561,36 +5568,59 @@ function platformDrawQuestionProgress(p) {
   pop();
 }
 
-function platformWrapTextLines(str, maxWidth) {
+function platformWrapTextLines(str, maxWidth, wordGapScale = 1) {
   let words = str.split(/\s+/).filter((word) => word.length > 0);
   let lines = [];
-  let line = "";
+  let lineWords = [];
+
+  function lineWidth(wordList) {
+    if (wordList.length === 0) {
+      return 0;
+    }
+
+    let spaceW = textWidth(" ") * wordGapScale;
+    let w = 0;
+
+    for (let i = 0; i < wordList.length; i++) {
+      w += textWidth(wordList[i]);
+      if (i < wordList.length - 1) {
+        w += spaceW;
+      }
+    }
+
+    return w;
+  }
 
   for (let i = 0; i < words.length; i++) {
-    let word = words[i];
-    let test = line ? `${line} ${word}` : word;
+    let testWords = lineWords.concat(words[i]);
 
-    if (textWidth(test) > maxWidth && line) {
-      lines.push(line);
-      line = word;
+    if (lineWidth(testWords) > maxWidth && lineWords.length > 0) {
+      lines.push(lineWords.join(" "));
+      lineWords = [words[i]];
     } else {
-      line = test;
+      lineWords = testWords;
     }
   }
 
-  if (line) {
-    lines.push(line);
+  if (lineWords.length > 0) {
+    lines.push(lineWords.join(" "));
   }
 
   return lines;
 }
 
-function platformDrawWrappedCenterText(str, centerX, y, maxWidth, leading) {
+function platformDrawWrappedCenterText(str, centerX, y, maxWidth, leading, wordGapScale = 1) {
   textAlign(CENTER, TOP);
-  let lines = platformWrapTextLines(str, maxWidth);
+  let lines = platformWrapTextLines(str, maxWidth, wordGapScale);
 
   for (let i = 0; i < lines.length; i++) {
-    text(lines[i], centerX, y + i * leading);
+    let lineY = y + i * leading;
+
+    if (wordGapScale === 1) {
+      text(lines[i], centerX, lineY);
+    } else {
+      platformDrawTightWordText(lines[i], centerX, lineY, leading, "center", wordGapScale);
+    }
   }
 
   return lines.length;
