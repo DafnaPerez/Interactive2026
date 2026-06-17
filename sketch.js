@@ -125,7 +125,7 @@ function platformGetSharePreviewTuning(animalId) {
     case "turtle":
       return { scale: 0.68, screenX: 0, screenY: -50, refX: 0, refY: 0 };
     case "deer":
-      return { scale: 0.54, screenX: 18, screenY: -32, refX: -102, refY: 8 };
+      return { scale: 0.54, screenX: 18, screenY: -52, refX: -102, refY: 8 };
     case "toad":
       return { scale: 0.64, screenX: 0, screenY: -45, refX: 0, refY: 0 };
     case "hyena":
@@ -234,7 +234,7 @@ const platformText = {
 
   share: {
     title: "Share this poster",
-    body: "Help friends discover how everyday choices protect wildlife.",
+    body: "Help friends discover how everyday choices\nprotect wildlife.",
     whatsapp: "WhatsApp",
     instagram: "Instagram",
     facebook: "Facebook",
