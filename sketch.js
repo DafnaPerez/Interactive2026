@@ -698,7 +698,7 @@ function platformGetShareOverlayLayout(p) {
   let previewH = cardH - (previewY - cardY) - pad - iconsRowH - backH - ms(16);
   let previewW = cardW - pad * 2;
   let previewX = cardX + pad;
-  let iconsY = previewY + previewH + ms(4) + iconHit * 0.5;
+  let iconsY = previewY + previewH + ms(12) + iconHit * 0.5;
   let backY = iconsY + iconHit * 0.5 + ms(10);
   let iconCenters = [
     cardX + cardW * 0.38,
@@ -775,22 +775,23 @@ function platformDrawShareOptionButton(box, alpha, hover, iconR) {
   translate(cx, cy);
   scale(s);
 
-  let img = platformGetShareLogo(box.kind);
   let d = iconR * 2;
+  noStroke();
+  let bg = color(box.accent);
+  bg.setAlpha(alpha);
+  fill(bg);
+  ellipse(0, 0, d, d);
+
+  let img = platformGetShareLogo(box.kind);
   if (img && img.width > 0) {
     imageMode(CENTER);
-    tint(255, alpha);
-    image(img, 0, 0, d, d);
     noTint();
-  } else {
-    noStroke();
-    let c = color(box.accent);
-    c.setAlpha(alpha);
-    fill(c);
-    ellipse(0, 0, d, d);
+    image(img, 0, 0, d, d);
   }
 
   pop();
+  imageMode(CORNER);
+  noTint();
 }
 
 function platformDrawShareCardBackground(card) {
@@ -816,35 +817,33 @@ function platformDrawShareCardBackground(card) {
 }
 
 function platformDrawAnimalPreviewInRect(p, rectBox) {
+  push();
+  imageMode(CORNER);
+  noTint();
+
   if (platformSharePreviewImage) {
-    image(platformSharePreviewImage, rectBox.x, rectBox.y);
+    image(platformSharePreviewImage, rectBox.x, rectBox.y, rectBox.w, rectBox.h);
+    pop();
     return;
   }
 
   if (!platformSharePreviewCapturePending) {
+    pop();
     return;
   }
-
-  let ctx = drawingContext;
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(rectBox.x, rectBox.y, rectBox.w, rectBox.h);
-  ctx.clip();
 
   platformSharePreviewStill = true;
   posterDrawAnimalSharePreview(p, rectBox);
   platformSharePreviewStill = false;
 
-  ctx.restore();
-
-  platformSharePreviewImage = get(
-    floor(rectBox.x),
-    floor(rectBox.y),
-    floor(rectBox.w),
-    floor(rectBox.h)
-  );
+  let px = floor(rectBox.x);
+  let py = floor(rectBox.y);
+  let pw = floor(rectBox.w);
+  let ph = floor(rectBox.h);
+  platformSharePreviewImage = get(px, py, pw, ph);
   platformSharePreviewCapturePending = false;
-  image(platformSharePreviewImage, rectBox.x, rectBox.y);
+  image(platformSharePreviewImage, rectBox.x, rectBox.y, rectBox.w, rectBox.h);
+  pop();
 }
 
 function platformDrawShareOverlay() {
