@@ -118,32 +118,39 @@ function posterDrawAnimalMobile(p) {
   pop();
 }
 
-function platformGetSharePreviewRefNudge(animalId) {
+function platformGetSharePreviewTuning(animalId) {
   switch (animalId) {
-    case "deer":
-      return { x: -118, y: 12 };
-    case "hyena":
-      return { x: -14, y: 8 };
     case "eagle":
-      return { x: -6, y: -18 };
+      return { scale: 0.60, screenX: 0, screenY: -30, refX: -6, refY: -18 };
+    case "turtle":
+      return { scale: 0.68, screenX: 0, screenY: -50, refX: 0, refY: 0 };
+    case "deer":
+      return { scale: 0.54, screenX: 18, screenY: -32, refX: -102, refY: 8 };
+    case "toad":
+      return { scale: 0.64, screenX: 0, screenY: -45, refX: 0, refY: 0 };
+    case "hyena":
+      return { scale: 0.68, screenX: 0, screenY: -50, refX: -14, refY: 8 };
     default:
-      return { x: 0, y: 0 };
+      return { scale: 0.68, screenX: 0, screenY: 0, refX: 0, refY: 0 };
   }
 }
 
 function posterDrawAnimalSharePreview(p, rectBox) {
   push();
   let screenScale = rectBox.w / platformW;
-  let animalScale = (platformW / ANIMAL_REF_W) * screenScale * 0.68;
-  let nudge = platformGetSharePreviewRefNudge(platformMode);
+  let tuning = platformGetSharePreviewTuning(platformMode);
+  let animalScale = (platformW / ANIMAL_REF_W) * screenScale * tuning.scale;
   translate(
-    rectBox.x + rectBox.w / 2,
-    rectBox.y + rectBox.h / 2 + ANIMAL_SCREEN_OFFSET_Y * screenScale
+    rectBox.x + rectBox.w / 2 + tuning.screenX,
+    rectBox.y +
+      rectBox.h / 2 +
+      ANIMAL_SCREEN_OFFSET_Y * screenScale +
+      tuning.screenY
   );
   scale(animalScale);
   translate(
-    -ANIMAL_REF_W / 2 + nudge.x,
-    -ANIMAL_ANCHOR_Y + nudge.y
+    -ANIMAL_REF_W / 2 + tuning.refX,
+    -ANIMAL_ANCHOR_Y + tuning.refY
   );
 
   platformTriangleDrawPass = 0;
@@ -7326,10 +7333,10 @@ function drawDeerAnimal() {
   // More alive than floating, less robotic than a separate jump.
   // =====================================================
 
-  let movement = p.finalMotion;
+  let movement = platformSharePreviewStill ? 0 : p.finalMotion;
 
   // Main rhythm. Adjust only this number if you want it slower/faster.
-  let gait = frameCount * 0.052;
+  let gait = platformSharePreviewStill ? 0 : frameCount * 0.052;
 
   // Smooth bounding energy. This creates a continuous rise/fall, not a hard jump.
   let bound = (1 - cos(gait)) / 2;
@@ -7716,6 +7723,7 @@ function drawPelobatesAnimal() {
   }
 
   let jumpActive =
+    !platformSharePreviewStill &&
     fullyAssembled &&
     p.jumpReadyTime !== null &&
     millis() - p.jumpReadyTime >= PELOBATES_JUMP_DELAY;
