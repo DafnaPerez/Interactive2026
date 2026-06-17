@@ -17,6 +17,20 @@ let platformPosterFadeStartTime = null;
 let platformPosterFadeDuration = 320;
 let platformPosterFadeColor = null;
 
+let platformShareOpen = false;
+let platformShareOpenTime = 0;
+let platformShareCopiedUntil = 0;
+let platformShareBoxes = null;
+let platformSharePreviewImage = null;
+let platformSharePreviewCapturePending = false;
+let platformSharePreviewStill = false;
+let platformShareFrozenFrame = 0;
+const PLATFORM_SHARE_FADE_MS = 260;
+
+function platformShareAnimFrame() {
+  return platformSharePreviewStill ? platformShareFrozenFrame : frameCount;
+}
+
 let platformLoadingTargetAnimal = null;
 let platformLoadingStartTime = null;
 const PLATFORM_LOADING_HOLD_MS = 450;
@@ -101,6 +115,45 @@ function posterDrawAnimalMobile(p) {
   pop();
 }
 
+function platformGetSharePreviewRefNudge(animalId) {
+  switch (animalId) {
+    case "deer":
+      return { x: -118, y: 12 };
+    case "hyena":
+      return { x: -14, y: 8 };
+    case "eagle":
+      return { x: -6, y: -18 };
+    default:
+      return { x: 0, y: 0 };
+  }
+}
+
+function posterDrawAnimalSharePreview(p, rectBox) {
+  push();
+  let screenScale = rectBox.w / platformW;
+  let animalScale = (platformW / ANIMAL_REF_W) * screenScale * 0.68;
+  let nudge = platformGetSharePreviewRefNudge(platformMode);
+  translate(
+    rectBox.x + rectBox.w / 2,
+    rectBox.y + rectBox.h / 2 + ANIMAL_SCREEN_OFFSET_Y * screenScale
+  );
+  scale(animalScale);
+  translate(
+    -ANIMAL_REF_W / 2 + nudge.x,
+    -ANIMAL_ANCHOR_Y + nudge.y
+  );
+
+  platformTriangleDrawPass = 0;
+  p.cfg.drawAnimal();
+
+  platformTriangleDrawPass = 1;
+  p.cfg.drawAnimal();
+
+  platformTriangleDrawPass = 0;
+  platformSuppressAnimalPieceDraw = false;
+  pop();
+}
+
 function platformGetIntroZoomScale(pts, cx, cy) {
   let maxDist = 1;
   for (let i = 0; i < 3; i++) {
@@ -167,6 +220,17 @@ const platformText = {
   finalCta: {
     text: "Turn small choices into change >>",
     size: ms(24)
+  },
+
+  share: {
+    title: "Share this poster",
+    body: "Help friends discover how everyday choices protect wildlife.",
+    whatsapp: "WhatsApp",
+    instagram: "Instagram",
+    facebook: "Facebook",
+    copied: "Link copied — paste in Instagram",
+    close: "Not now",
+    back: "Back to main screen"
   }
 };
 
@@ -256,6 +320,9 @@ function draw() {
   platformEnsureAnimalStarted();
   platformInvokeAnimal("draw");
   platformDrawPosterFadeOverlay();
+  if (platformShareOpen) {
+    platformDrawShareOverlay();
+  }
 }
 
 function mousePressed() {
@@ -265,6 +332,11 @@ function mousePressed() {
   }
 
   if (platformMode === "loading") {
+    return;
+  }
+
+  if (platformShareOpen) {
+    platformHandleSharePress();
     return;
   }
 
@@ -286,6 +358,11 @@ function touchStarted() {
     return false;
   }
 
+  if (platformShareOpen) {
+    platformHandleSharePress();
+    return false;
+  }
+
   if (platformIsCurrentPosterFinal()) {
     platformHandleFinalCtaPress();
     return false;
@@ -303,8 +380,11 @@ function windowResized() {
 }
 
 function keyPressed() {
-  // Press ESC to return to the opening screen while testing.
   if (keyCode === ESCAPE) {
+    if (platformShareOpen) {
+      platformCloseShare();
+      return;
+    }
     platformReturnToIntro();
   }
 }
@@ -460,11 +540,432 @@ function platformHandleFinalCtaPress() {
   }
 
   if (platformWasBoxClicked(p.finalCtaBox)) {
+    platformOpenShare();
+  }
+}
+
+function platformOpenShare() {
+  let p = posterRegistry[platformMode];
+  platformShareOpen = true;
+  platformShareOpenTime = millis();
+  platformShareCopiedUntil = 0;
+  platformShareFrozenFrame = frameCount;
+  platformSharePreviewImage = null;
+  platformSharePreviewCapturePending = true;
+  platformShareBoxes = p ? platformGetShareOverlayLayout(p) : null;
+}
+
+function platformCloseShare() {
+  platformShareOpen = false;
+  platformShareCopiedUntil = 0;
+  platformShareBoxes = null;
+  platformSharePreviewImage = null;
+  platformSharePreviewCapturePending = false;
+  platformSharePreviewStill = false;
+}
+
+function platformGetSharePageUrl() {
+  if (typeof window === "undefined" || !window.location) {
+    return "https://dafnaperez.github.io/Interactive2026/";
+  }
+
+  try {
+    let url = new URL(window.location.href);
+    if (posterRegistry[platformMode]) {
+      url.searchParams.set("animal", platformMode);
+    }
+    return url.toString();
+  } catch (err) {
+    return window.location.href;
+  }
+}
+
+function platformGetShareMessage(p) {
+  let title = p?.cfg?.headerTitle || "wildlife in Israel";
+  return (
+    "Every choice counts. I explored how small daily choices can help protect " +
+    title +
+    "."
+  );
+}
+
+function platformGetSharePayload(p) {
+  let message = platformGetShareMessage(p);
+  let url = platformGetSharePageUrl();
+  return { message, url, text: message + " " + url };
+}
+
+function platformOpenExternalUrl(url) {
+  if (typeof window !== "undefined") {
+    window.open(url, "_blank", "noopener,noreferrer");
+  }
+}
+
+function platformCopyShareText(text) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).catch(() => {});
+    return;
+  }
+
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  let field = document.createElement("textarea");
+  field.value = text;
+  field.setAttribute("readonly", "");
+  field.style.position = "fixed";
+  field.style.left = "-9999px";
+  document.body.appendChild(field);
+  field.select();
+
+  try {
+    document.execCommand("copy");
+  } catch (err) {
+    // Clipboard unavailable in this environment.
+  }
+
+  document.body.removeChild(field);
+}
+
+function platformShareViaWhatsApp(p) {
+  let payload = platformGetSharePayload(p);
+  platformOpenExternalUrl(
+    "https://api.whatsapp.com/send?text=" + encodeURIComponent(payload.text)
+  );
+}
+
+function platformShareViaFacebook(p) {
+  let payload = platformGetSharePayload(p);
+  platformOpenExternalUrl(
+    "https://www.facebook.com/sharer/sharer.php?u=" +
+      encodeURIComponent(payload.url) +
+      "&quote=" +
+      encodeURIComponent(payload.message)
+  );
+}
+
+function platformShareViaInstagram(p) {
+  platformCopyShareText(platformGetSharePayload(p).text);
+  platformShareCopiedUntil = millis() + 2200;
+}
+
+function platformGetShareOverlayAlpha() {
+  if (!platformShareOpen) {
+    return 0;
+  }
+
+  return constrain(
+    map(millis() - platformShareOpenTime, 0, PLATFORM_SHARE_FADE_MS, 0, 255),
+    0,
+    255
+  );
+}
+
+function platformGetShareOverlayLayout(p) {
+  let cardW = platformW - mx(52);
+  let cardX = (platformW - cardW) / 2;
+  let cardH = cardW;
+  let cardY = (platformH - cardH) / 2;
+
+  let pad = ms(18);
+  let closeSize = ms(28);
+  let titleSize = ms(20);
+  let bodySize = ms(13);
+  let bodyLeading = ms(16);
+  let titleBlockH = titleSize + ms(4);
+  let bodyBlockH = bodyLeading * 2;
+  let textTop = cardY + pad + ms(4);
+  let previewY = textTop + titleBlockH + bodyBlockH + ms(8);
+  let iconR = ms(22);
+  let iconHit = iconR * 2 + ms(10);
+  let backH = ms(34);
+  let iconsRowH = iconHit;
+  let previewH = cardH - (previewY - cardY) - pad - iconsRowH - backH - ms(28);
+  let previewW = cardW - pad * 2;
+  let previewX = cardX + pad;
+  let iconsY = previewY + previewH + ms(14) + iconHit * 0.5;
+  let backY = iconsY + iconHit * 0.5 + ms(14);
+  let iconCenters = [
+    cardX + cardW * 0.25,
+    cardX + cardW * 0.5,
+    cardX + cardW * 0.75
+  ];
+
+  function iconBox(cx) {
+    return {
+      x: cx - iconHit / 2,
+      y: iconsY - iconHit / 2,
+      w: iconHit,
+      h: iconHit
+    };
+  }
+
+  return {
+    card: { x: cardX, y: cardY, w: cardW, h: cardH },
+    close: {
+      x: cardX + cardW - pad - closeSize,
+      y: cardY + pad - ms(2),
+      w: closeSize,
+      h: closeSize
+    },
+    whatsapp: {
+      ...iconBox(iconCenters[0]),
+      accent: "#25D366",
+      kind: "whatsapp"
+    },
+    instagram: {
+      ...iconBox(iconCenters[1]),
+      accent: "#C13584",
+      kind: "instagram"
+    },
+    facebook: {
+      ...iconBox(iconCenters[2]),
+      accent: "#1877F2",
+      kind: "facebook"
+    },
+    back: {
+      x: cardX + pad,
+      y: backY,
+      w: cardW - pad * 2,
+      h: backH
+    },
+    iconR,
+    titleSize,
+    bodySize,
+    bodyLeading,
+    textTop,
+    preview: { x: previewX, y: previewY, w: previewW, h: previewH },
+    copiedY: backY + backH + ms(6)
+  };
+}
+
+function platformDrawShareOptionButton(box, alpha, hover, iconR) {
+  push();
+  let s = hover ? 1.04 : 1;
+  let cx = box.x + box.w / 2;
+  let cy = box.y + box.h / 2;
+  translate(cx, cy);
+  scale(s);
+  noStroke();
+  let c = color(box.accent);
+  c.setAlpha(alpha);
+  fill(c);
+  ellipse(0, 0, iconR * 2, iconR * 2);
+
+  platformApplyGrungeFont(posterRegistry[platformMode]?.grungeFont);
+  fill(255, alpha);
+  textAlign(CENTER, CENTER);
+  textStyle(BOLD);
+  let iconText = box.kind === "whatsapp" ? "W" : box.kind === "instagram" ? "Ig" : "f";
+  textSize(ms(16));
+  text(iconText, 0, ms(1));
+  textStyle(NORMAL);
+  pop();
+}
+
+function platformDrawShareCardBackground(card) {
+  let ctx = drawingContext;
+  let r = ms(18);
+
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.18)";
+  ctx.shadowBlur = ms(22);
+  ctx.shadowOffsetY = ms(10);
+  ctx.shadowOffsetX = 0;
+  ctx.fillStyle = "rgba(255,255,255,1)";
+  platformRoundRectPath(ctx, card.x, card.y, card.w, card.h, r);
+  ctx.fill();
+  ctx.restore();
+
+  noFill();
+  stroke(220, 210, 196);
+  strokeWeight(1);
+  rectMode(CORNER);
+  rect(card.x, card.y, card.w, card.h, r);
+  noStroke();
+}
+
+function platformDrawAnimalPreviewInRect(p, rectBox) {
+  if (platformSharePreviewImage) {
+    image(platformSharePreviewImage, rectBox.x, rectBox.y);
+    return;
+  }
+
+  if (!platformSharePreviewCapturePending) {
+    return;
+  }
+
+  let ctx = drawingContext;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rectBox.x, rectBox.y, rectBox.w, rectBox.h);
+  ctx.clip();
+
+  platformSharePreviewStill = true;
+  posterDrawAnimalSharePreview(p, rectBox);
+  platformSharePreviewStill = false;
+
+  ctx.restore();
+
+  platformSharePreviewImage = get(
+    floor(rectBox.x),
+    floor(rectBox.y),
+    floor(rectBox.w),
+    floor(rectBox.h)
+  );
+  platformSharePreviewCapturePending = false;
+  image(platformSharePreviewImage, rectBox.x, rectBox.y);
+}
+
+function platformDrawShareOverlay() {
+  let p = posterRegistry[platformMode];
+  if (!p) {
+    return;
+  }
+
+  let layout = platformGetShareOverlayLayout(p);
+  platformShareBoxes = layout;
+  let card = layout.card;
+  let shadeAlpha = platformGetShareOverlayAlpha();
+
+  let hoverClose =
+    mouseX > layout.close.x &&
+    mouseX < layout.close.x + layout.close.w &&
+    mouseY > layout.close.y &&
+    mouseY < layout.close.y + layout.close.h;
+
+  push();
+  rectMode(CORNER);
+  noStroke();
+  if (shadeAlpha > 0) {
+    fill(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], shadeAlpha * 0.46);
+    rect(0, 0, platformW, platformH);
+  }
+
+  platformDrawShareCardBackground(card);
+
+  platformApplyGrungeFont(p.grungeFont);
+  let ink = color(PLATFORM_TEXT_COLOR);
+  fill(ink);
+  noStroke();
+  textAlign(LEFT, TOP);
+  textSize(layout.titleSize);
+  text(platformText.share.title, card.x + ms(22), layout.textTop);
+
+  ink.setAlpha(210);
+  fill(ink);
+  textSize(layout.bodySize);
+  textLeading(layout.bodyLeading);
+  text(
+    platformText.share.body,
+    card.x + ms(22),
+    layout.textTop + layout.titleSize + ms(6),
+    card.w - ms(44)
+  );
+
+  platformDrawAnimalPreviewInRect(p, layout.preview);
+
+  let shareButtons = [layout.whatsapp, layout.instagram, layout.facebook];
+  for (let i = 0; i < shareButtons.length; i++) {
+    let box = shareButtons[i];
+    let hover =
+      !p.touchDevice &&
+      mouseX > box.x &&
+      mouseX < box.x + box.w &&
+      mouseY > box.y &&
+      mouseY < box.y + box.h;
+    platformDrawShareOptionButton(box, 255, hover, layout.iconR);
+  }
+
+  platformApplyGrungeFont(p.grungeFont);
+
+  if (millis() < platformShareCopiedUntil) {
+    fill(ink);
+    textAlign(CENTER, TOP);
+    textSize(ms(13));
+    text(platformText.share.copied, platformW / 2, layout.copiedY);
+  }
+
+  let backHover =
+    !p.touchDevice &&
+    mouseX > layout.back.x &&
+    mouseX < layout.back.x + layout.back.w &&
+    mouseY > layout.back.y &&
+    mouseY < layout.back.y + layout.back.h;
+  ink.setAlpha(255);
+  fill(ink);
+  textAlign(CENTER, CENTER);
+  textSize(ms(16));
+  text(
+    platformText.share.back,
+    layout.back.x + layout.back.w / 2,
+    layout.back.y + layout.back.h / 2
+  );
+  if (backHover) {
+    stroke(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 70);
+    strokeWeight(1);
+    line(
+      layout.back.x + ms(28),
+      layout.back.y + layout.back.h - ms(10),
+      layout.back.x + layout.back.w - ms(28),
+      layout.back.y + layout.back.h - ms(10)
+    );
+    noStroke();
+  }
+
+  ink.setAlpha(hoverClose ? 220 : 140);
+  fill(ink);
+  textAlign(CENTER, CENTER);
+  textSize(ms(28));
+  text("×", layout.close.x + layout.close.w / 2, layout.close.y + layout.close.h / 2);
+  pop();
+}
+
+function platformHandleSharePress() {
+  let p = posterRegistry[platformMode];
+  let boxes = platformShareBoxes;
+  if (!p) {
+    return;
+  }
+
+  if (!boxes) {
+    boxes = platformGetShareOverlayLayout(p);
+    platformShareBoxes = boxes;
+  }
+
+  if (!platformWasBoxClicked(boxes.card)) {
+    platformCloseShare();
+    return;
+  }
+
+  if (platformWasBoxClicked(boxes.close)) {
+    platformCloseShare();
+    return;
+  }
+
+  if (platformWasBoxClicked(boxes.back)) {
     platformReturnToIntro();
+    return;
+  }
+
+  if (platformWasBoxClicked(boxes.whatsapp)) {
+    platformShareViaWhatsApp(p);
+    return;
+  }
+
+  if (platformWasBoxClicked(boxes.instagram)) {
+    platformShareViaInstagram(p);
+    return;
+  }
+
+  if (platformWasBoxClicked(boxes.facebook)) {
+    platformShareViaFacebook(p);
   }
 }
 
 function platformReturnToIntro() {
+  platformCloseShare();
   platformMode = "intro";
   platformSelectedStarted = false;
   platformIntroTransitionActive = false;
