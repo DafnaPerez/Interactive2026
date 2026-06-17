@@ -527,15 +527,17 @@ function platformDrawMainBackground() {
 
   for (let y = 0; y < platformH; y++) {
     let t = map(y, 0, platformH, 0, 1);
-    let c = lerpColor(color(PLATFORM_BG_COLOR), color("#EDE1D1"), t);
+    let c = lerpColor(color(PLATFORM_BG_COLOR), color("#E9DAC8"), t);
     fill(c);
     rect(0, y, platformW, 1);
   }
 
-  for (let r = mx(520); r > 0; r -= mx(20)) {
-    let a = map(r, 520, 0, 0, 18);
-    fill(255, 248, 236, a);
-    ellipse(platformW / 2, my(470), mx(r) * 1.05, my(r) * 0.82);
+  let glowMaxR = mx(500);
+  for (let r = glowMaxR; r > 0; r -= mx(20)) {
+    let t = 1 - r / glowMaxR;
+    let a = pow(t, 1.35) * 14;
+    fill(251, 244, 234, a);
+    ellipse(platformW / 2, my(470), mx(r) * 1.03, my(r) * 0.8);
   }
 }
 
@@ -1134,7 +1136,7 @@ const platformLooseTargetCache = {};
 const platformLooseGroupBBoxCache = {};
 const platformPelobatesTargetCache = {};
 const platformChoiceImageVisualOffsetCache = new WeakMap();
-const platformLooseLayoutVersion = 91;
+const platformLooseLayoutVersion = 93;
 const PLATFORM_LOOSE_ROT_PAD = 24;
 const PLATFORM_LOOSE_STROKE_PAD = 3;
 
@@ -7469,10 +7471,28 @@ let hyenaLooseTargetCache = null;
 let hyenaLooseTargetCacheH = 0;
 let hyenaLooseTargetCacheVersion = 0;
 const HYENA_LOOSE_PIECES = 80;
-const HYENA_LOOSE_LAYOUT_VERSION = 6;
-const HYENA_SCATTER_OFFSET_Y = 50;
+const HYENA_LOOSE_LAYOUT_VERSION = 11;
+const HYENA_SCATTER_OFFSET_Y = 16;
 const HYENA_SCATTER_EXPAND_Y = 28;
 const HYENA_SCATTER_EXPAND_X = 10;
+const HYENA_CIRCULAR_LAYOUT = {
+  centerU: 0.5,
+  centerV: 0.34,
+  coreCount: 32,
+  coreInner: 0.02,
+  coreOuter: 0.16,
+  corePow: 0.5,
+  outerInner: 0.07,
+  outerOuter: 0.38,
+  outerPow: 0.44,
+  radiusScaleX: 1.08,
+  radiusScaleY: 1.42,
+  uMin: 0.06,
+  uMax: 0.94,
+  vMin: 0.08,
+  vMax: 0.84,
+  screenShift: { x: 0, y: 0 }
+};
 
 function hyenaGetScatterBounds() {
   let topScreen =
@@ -7496,7 +7516,7 @@ function hyenaGetScatterBounds() {
 }
 
 function hyenaScatterUVForIndex(index, count) {
-  return platformLooseScatterUVForIndex(index, count);
+  return platformLooseScatterUVForIndex(index, count, HYENA_CIRCULAR_LAYOUT);
 }
 
 function hyenaRefFromScatterUV(u, v, bounds) {
