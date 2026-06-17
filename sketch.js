@@ -315,6 +315,7 @@ function setup() {
   }
 
   platformCanvasReady = true;
+  platformProcessShareLogos();
   platformBindViewportListeners();
   platformApplyViewportLayout();
   platformApplyStartupQuery();
@@ -752,6 +753,47 @@ function platformGetShareOverlayLayout(p) {
     preview: { x: previewX, y: previewY, w: previewW, h: previewH },
     copiedY: backY + backH + ms(6)
   };
+}
+
+function platformProcessShareLogo(img) {
+  if (!img || img.width <= 0) {
+    return img;
+  }
+
+  img.loadPixels();
+  let [tr, tg, tb] = PLATFORM_TEXT_RGB;
+
+  for (let i = 0; i < img.pixels.length; i += 4) {
+    let a = img.pixels[i + 3];
+    if (a === 0) {
+      continue;
+    }
+
+    let r = img.pixels[i];
+    let g = img.pixels[i + 1];
+    let b = img.pixels[i + 2];
+    let lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    let ink = 255 - lum;
+
+    if (ink < 18) {
+      img.pixels[i + 3] = 0;
+      continue;
+    }
+
+    img.pixels[i] = tr;
+    img.pixels[i + 1] = tg;
+    img.pixels[i + 2] = tb;
+    img.pixels[i + 3] = a * ink / 255;
+  }
+
+  img.updatePixels();
+  return img;
+}
+
+function platformProcessShareLogos() {
+  platformShareWhatsappLogo = platformProcessShareLogo(platformShareWhatsappLogo);
+  platformShareInstagramLogo = platformProcessShareLogo(platformShareInstagramLogo);
+  platformShareFacebookLogo = platformProcessShareLogo(platformShareFacebookLogo);
 }
 
 function platformGetShareLogo(kind) {
