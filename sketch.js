@@ -29,6 +29,7 @@ const PLATFORM_SHARE_FADE_MS = 260;
 let platformShareWhatsappLogo = null;
 let platformShareInstagramLogo = null;
 let platformShareFacebookLogo = null;
+let platformLineArtRecolorCache = new WeakMap();
 
 function platformShareAnimFrame() {
   return platformSharePreviewStill ? platformShareFrozenFrame : frameCount;
@@ -315,7 +316,7 @@ function setup() {
   }
 
   platformCanvasReady = true;
-  platformProcessShareLogos();
+  platformProcessLineArtImages();
   platformBindViewportListeners();
   platformApplyViewportLayout();
   platformApplyStartupQuery();
@@ -755,17 +756,26 @@ function platformGetShareOverlayLayout(p) {
   };
 }
 
-function platformProcessShareLogo(img) {
+function platformRecolorLineArtImage(img) {
   if (!img || img.width <= 0) {
     return img;
   }
 
+  if (platformLineArtRecolorCache.has(img)) {
+    return platformLineArtRecolorCache.get(img);
+  }
+
+  let w = img.width;
+  let h = img.height;
+  let out = createImage(w, h);
   img.loadPixels();
+  out.loadPixels();
   let [tr, tg, tb] = PLATFORM_TEXT_RGB;
 
   for (let i = 0; i < img.pixels.length; i += 4) {
     let a = img.pixels[i + 3];
-    if (a === 0) {
+    if (a < 6) {
+      out.pixels[i + 3] = 0;
       continue;
     }
 
@@ -773,27 +783,40 @@ function platformProcessShareLogo(img) {
     let g = img.pixels[i + 1];
     let b = img.pixels[i + 2];
     let lum = 0.299 * r + 0.587 * g + 0.114 * b;
-    let ink = 255 - lum;
+    let darkness = 255 - lum;
+    let ink = darkness > 12 ? min(a, darkness) : a * darkness / 255;
 
-    if (ink < 18) {
-      img.pixels[i + 3] = 0;
+    if (ink < 8) {
+      out.pixels[i + 3] = 0;
       continue;
     }
 
-    img.pixels[i] = tr;
-    img.pixels[i + 1] = tg;
-    img.pixels[i + 2] = tb;
-    img.pixels[i + 3] = a * ink / 255;
+    out.pixels[i] = tr;
+    out.pixels[i + 1] = tg;
+    out.pixels[i + 2] = tb;
+    out.pixels[i + 3] = ink;
   }
 
-  img.updatePixels();
-  return img;
+  out.updatePixels();
+  platformLineArtRecolorCache.set(img, out);
+  return out;
 }
 
-function platformProcessShareLogos() {
-  platformShareWhatsappLogo = platformProcessShareLogo(platformShareWhatsappLogo);
-  platformShareInstagramLogo = platformProcessShareLogo(platformShareInstagramLogo);
-  platformShareFacebookLogo = platformProcessShareLogo(platformShareFacebookLogo);
+function platformProcessLineArtImages() {
+  platformShareWhatsappLogo = platformRecolorLineArtImage(platformShareWhatsappLogo);
+  platformShareInstagramLogo = platformRecolorLineArtImage(platformShareInstagramLogo);
+  platformShareFacebookLogo = platformRecolorLineArtImage(platformShareFacebookLogo);
+
+  for (let id in posterRegistry) {
+    let imgs = posterRegistry[id].images;
+    if (!imgs) {
+      continue;
+    }
+
+    for (let key in imgs) {
+      imgs[key] = platformRecolorLineArtImage(imgs[key]);
+    }
+  }
 }
 
 function platformGetShareLogo(kind) {
