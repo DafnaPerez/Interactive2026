@@ -186,7 +186,7 @@ const platformText = {
     text: "Tap a triangle to begin",
     x: platformW / 2,
     y: my(620) + 160,
-    size: ms(17),
+    size: ms(20),
     alpha: 180
   },
 
@@ -195,7 +195,7 @@ const platformText = {
       "In the next steps, you'll answer a few questions about everyday decisions and how they can help protect the environment.",
     x: platformW / 2,
     y: my(560),
-    size: ms(17),
+    size: ms(20),
     leading: ms(24),
     wordGapScale: 0.72
   },
@@ -411,7 +411,7 @@ function platformIsCurrentPosterFinal() {
 
 function platformGetFinalCtaLayout(p) {
   let cfg = p.cfg;
-  let bodySize = ms(17);
+  let bodySize = ms(20);
   let bodyLeading = ms(20);
   let bodyY = platformGetFinalBodyTopY() + POSTER_LAYOUT.finalContentYOffset + POSTER_LAYOUT.finalMessageNudgeY;
   let bodyLineCount = cfg.finalBody.text.split("\n").length;
@@ -687,7 +687,7 @@ function platformGetShareOverlayLayout(p) {
   let pad = ms(18);
   let closeSize = ms(28);
   let titleSize = platformText.finalCta.size;
-  let bodySize = ms(17);
+  let bodySize = ms(20);
   let bodyLeading = ms(22);
   let titleBlockH = titleSize + ms(6);
   let bodyBlockH = bodyLeading * 2;
@@ -5781,7 +5781,7 @@ const POSTER_LAYOUT = {
 
 function platformGetFinalBodyTopY() {
   let bodyLeading = ms(20);
-  let bodySize = ms(17);
+  let bodySize = ms(20);
   let bodyBlockH =
     (POSTER_LAYOUT.finalBodyLineCount - 1) * bodyLeading + bodySize;
   let textCenterY =
@@ -6644,7 +6644,7 @@ function posterDrawHeader(p) {
   platformApplyGrungeFont(p.grungeFont);
   textStyle(NORMAL);
   textAlign(LEFT, TOP);
-  textSize(ms(17));
+  textSize(ms(20));
   textLeading(cfg.headerLeading);
   text(cfg.headerTitle, POSTER_LAYOUT.headerTextX, POSTER_LAYOUT.headerTextY + POSTER_LAYOUT.headerNudgeY);
 }
@@ -6709,7 +6709,7 @@ function posterDrawFinalMessage(p, alphaOverride = null) {
   noStroke();
   let leftCellX = POSTER_LAYOUT.marginX;
 
-  let bodySize = ms(17);
+  let bodySize = ms(20);
   let bodyLeading = ms(20);
   textSize(bodySize);
   textLeading(bodyLeading);
