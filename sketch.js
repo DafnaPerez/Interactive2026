@@ -192,7 +192,7 @@ const platformText = {
 
   loadingHint: {
     text:
-      "In the next steps, you'll answer a few questions about everyday decisions and how they can help protect the environment.",
+      "In the next steps, you'll answer a few questions\nabout everyday decisions and how they can help\nprotect the environment.",
     x: platformW / 2,
     y: my(560),
     size: ms(20),
@@ -209,7 +209,7 @@ const platformText = {
   },
 
   choiceLabel: {
-    size: ms(14),
+    size: ms(17),
     alpha: 255,
     yOffset: ms(10)
   },
@@ -236,7 +236,7 @@ const platformText = {
 
   share: {
     title: "Share this poster",
-    body: "Help friends discover how everyday choices can protect\nthe israeli wildlife.",
+    body: "Help friends discover how everyday choices can protect the israeli wildlife.",
     whatsapp: "WhatsApp",
     instagram: "Instagram",
     facebook: "Facebook",
@@ -356,6 +356,10 @@ function mousePressed() {
     return;
   }
 
+  if (platformHandlePosterBackPress()) {
+    return;
+  }
+
   if (platformIsCurrentPosterFinal()) {
     platformHandleFinalCtaPress();
     return;
@@ -376,6 +380,10 @@ function touchStarted() {
 
   if (platformShareOpen) {
     platformHandleSharePress();
+    return false;
+  }
+
+  if (platformHandlePosterBackPress()) {
     return false;
   }
 
@@ -409,10 +417,14 @@ function platformIsCurrentPosterFinal() {
   return p && p.clickCount >= p.cfg.finalClickCount;
 }
 
+function platformGetFinalBodyLeading(cfg) {
+  return cfg?.finalBody?.leading ?? POSTER_LAYOUT.finalBodyLeading;
+}
+
 function platformGetFinalCtaLayout(p) {
   let cfg = p.cfg;
   let bodySize = ms(20);
-  let bodyLeading = ms(20);
+  let bodyLeading = platformGetFinalBodyLeading(cfg);
   let bodyY = platformGetFinalBodyTopY() + POSTER_LAYOUT.finalContentYOffset + POSTER_LAYOUT.finalMessageNudgeY;
   let bodyLineCount = cfg.finalBody.text.split("\n").length;
   let actualBodyBlockH = (bodyLineCount - 1) * bodyLeading + bodySize;
@@ -685,23 +697,44 @@ function platformGetShareOverlayLayout(p) {
   let cardY = (platformH - cardH) / 2;
 
   let pad = ms(18);
-  let closeSize = ms(28);
+  let shareTouchSize = ms(44);
+  let closeSize = shareTouchSize;
   let titleSize = platformText.finalCta.size;
   let bodySize = ms(20);
   let bodyLeading = ms(22);
+  let textX = cardX + pad;
+  let closeY = cardY + pad - ms(2);
+  let textTop = closeY + (closeSize - titleSize) / 2 + ms(9);
+  let bodyMaxW = cardW - pad * 2;
+  if (p?.grungeFont) {
+    textFont(p.grungeFont);
+  }
+  textSize(bodySize);
+  let bodyLineCount = platformWrapTextLines(
+    platformText.share.body,
+    bodyMaxW,
+    1
+  ).length;
   let titleBlockH = titleSize + ms(6);
-  let bodyBlockH = bodyLeading * 2;
-  let textTop = cardY + pad + ms(4);
-  let previewY = textTop + titleBlockH + bodyBlockH + ms(8);
-  let iconR = ms(22);
-  let iconHit = iconR * 2 + ms(10);
-  let backH = ms(34);
+  let bodyBlockH = (bodyLineCount - 1) * bodyLeading + bodySize;
+  let previewY = textTop + titleBlockH + bodyBlockH + ms(10);
+  let iconHit = shareTouchSize;
+  let backH = shareTouchSize;
   let iconsRowH = iconHit;
-  let previewH = cardH - (previewY - cardY) - pad - iconsRowH - backH - ms(16);
-  let previewW = cardW - pad * 2;
-  let previewX = cardX + pad;
-  let iconsY = previewY + previewH + iconHit * 0.5 - 8;
-  let backY = iconsY + iconHit * 0.5 + ms(10);
+  let previewInset = ms(10);
+  let previewShrinkH = ms(14);
+  let previewW = cardW - pad * 2 - previewInset * 2;
+  let previewX = cardX + pad + previewInset;
+  let previewH =
+    cardH -
+    (previewY - cardY) -
+    pad -
+    iconsRowH -
+    backH -
+    ms(16) -
+    previewShrinkH;
+  let iconsY = previewY + previewH + iconHit * 0.5 - 8 + ms(16);
+  let backY = iconsY + iconHit * 0.5 + ms(15);
   let iconCenters = [
     cardX + cardW * 0.38,
     cardX + cardW * 0.5,
@@ -721,24 +754,27 @@ function platformGetShareOverlayLayout(p) {
     card: { x: cardX, y: cardY, w: cardW, h: cardH },
     close: {
       x: cardX + cardW - pad - closeSize,
-      y: cardY + pad - ms(2),
+      y: closeY,
       w: closeSize,
       h: closeSize
     },
     whatsapp: {
       ...iconBox(iconCenters[0]),
       accent: "#25D366",
-      kind: "whatsapp"
+      kind: "whatsapp",
+      iconR: ms(23)
     },
     instagram: {
       ...iconBox(iconCenters[1]),
       accent: "#C13584",
-      kind: "instagram"
+      kind: "instagram",
+      iconR: ms(20)
     },
     facebook: {
       ...iconBox(iconCenters[2]),
       accent: "#1877F2",
-      kind: "facebook"
+      kind: "facebook",
+      iconR: ms(23)
     },
     back: {
       x: cardX + pad,
@@ -746,10 +782,14 @@ function platformGetShareOverlayLayout(p) {
       w: cardW - pad * 2,
       h: backH
     },
-    iconR,
+    iconR: ms(22),
     titleSize,
     bodySize,
     bodyLeading,
+    bodyMaxW,
+    closeSize,
+    shareTouchSize,
+    textX,
     textTop,
     preview: { x: previewX, y: previewY, w: previewW, h: previewH },
     copiedY: backY + backH + ms(6)
@@ -838,6 +878,8 @@ function platformDrawShareOptionButton(box, alpha, hover, iconR) {
     return;
   }
 
+  let drawR = box.iconR ?? iconR;
+
   push();
   let s = hover ? 1.04 : 1;
   let cx = box.x + box.w / 2;
@@ -848,7 +890,7 @@ function platformDrawShareOptionButton(box, alpha, hover, iconR) {
   drawingContext.imageSmoothingQuality = "high";
   imageMode(CENTER);
   noTint();
-  image(img, 0, 0, iconR * 2, iconR * 2);
+  image(img, 0, 0, drawR * 2, drawR * 2);
   pop();
   imageMode(CORNER);
 }
@@ -938,7 +980,7 @@ function platformDrawShareOverlay() {
   noStroke();
   textAlign(LEFT, TOP);
   textSize(layout.titleSize);
-  text(platformText.share.title, card.x + ms(22), layout.textTop);
+  text(platformText.share.title, layout.textX, layout.textTop);
 
   ink.setAlpha(210);
   fill(ink);
@@ -946,9 +988,9 @@ function platformDrawShareOverlay() {
   textLeading(layout.bodyLeading);
   text(
     platformText.share.body,
-    card.x + ms(22),
+    layout.textX,
     layout.textTop + layout.titleSize + ms(6),
-    card.w - ms(44)
+    layout.bodyMaxW
   );
 
   platformDrawAnimalPreviewInRect(p, layout.preview);
@@ -993,7 +1035,7 @@ function platformDrawShareOverlay() {
   ink.setAlpha(hoverClose ? 220 : 140);
   fill(ink);
   textAlign(CENTER, CENTER);
-  textSize(ms(28));
+  textSize(layout.closeSize * 0.88);
   text("×", layout.close.x + layout.close.w / 2, layout.close.y + layout.close.h / 2);
   pop();
 }
@@ -5645,6 +5687,22 @@ function platformDrawQuestionProgress(p) {
 }
 
 function platformWrapTextLines(str, maxWidth, wordGapScale = 1) {
+  if (str.includes("\n")) {
+    let allLines = [];
+
+    for (let part of str.split("\n")) {
+      let trimmed = part.trim();
+      if (trimmed.length === 0) {
+        continue;
+      }
+      allLines = allLines.concat(
+        platformWrapTextLines(trimmed, maxWidth, wordGapScale)
+      );
+    }
+
+    return allLines;
+  }
+
   let words = str.split(/\s+/).filter((word) => word.length > 0);
   let lines = [];
   let lineWords = [];
@@ -5680,6 +5738,22 @@ function platformWrapTextLines(str, maxWidth, wordGapScale = 1) {
 
   if (lineWords.length > 0) {
     lines.push(lineWords.join(" "));
+  }
+
+  while (lines.length >= 2) {
+    let lastWords = lines[lines.length - 1].split(" ");
+    if (lastWords.length > 1) {
+      break;
+    }
+
+    let prevWords = lines[lines.length - 2].split(" ");
+    if (prevWords.length < 2) {
+      break;
+    }
+
+    let moved = prevWords.pop();
+    lines[lines.length - 2] = prevWords.join(" ");
+    lines[lines.length - 1] = moved + " " + lines[lines.length - 1];
   }
 
   return lines;
@@ -5749,7 +5823,15 @@ const POSTER_LAYOUT = {
   headerTextX: mx(40),
   headerTextY: my(34) + ms(5) + 20,
   headerNudgeY: -30,
-  finalFooterNudgeY: 0,
+  headerLineNudgeY: ms(2),
+  backButtonSize: ms(44),
+  backButtonGlyphSize: ms(36),
+  backButtonLabelGap: ms(8),
+  backButtonStrokeWeight: ms(1.4),
+  headerBackNudgeX: ms(-14),
+  headerNameNudgeX: ms(-5),
+  finalFooterNudgeY: ms(-35),
+  headerBackNudgeY: ms(-2),
   finalMessageNudgeY: -60,
   feedbackNudgeY: -25,
   choiceW: ms(168),
@@ -5767,6 +5849,8 @@ const POSTER_LAYOUT = {
   finalContentYOffset: -10,
   finalBodyX: mx(345),
   finalBodyXOffset: -35,
+  finalBodyXNudge: ms(8),
+  finalBodyLeading: ms(24),
   finalBodyLineCount: 7,
   finalCtaGap: ms(26),
   finalCtaH: ms(56),
@@ -5780,7 +5864,7 @@ const POSTER_LAYOUT = {
 };
 
 function platformGetFinalBodyTopY() {
-  let bodyLeading = ms(20);
+  let bodyLeading = POSTER_LAYOUT.finalBodyLeading;
   let bodySize = ms(20);
   let bodyBlockH =
     (POSTER_LAYOUT.finalBodyLineCount - 1) * bodyLeading + bodySize;
@@ -5944,7 +6028,7 @@ const posterRegistry = {
     headerLeading: ms(18),
     finalFooter: { text: "Only 15 Green Sea Turtle\nnests in Israel" },
     finalBody: {
-      text: "Smart everyday choices can help\nprotect sea turtles. Reducing\nplastic, choosing reusable\nproducts, and keeping beaches\nclean can prevent pollution from\nreaching the ocean and helping\nsea turtles survive in nature."
+      text: "Smart everyday choices can\nhelp protect sea turtles.\nReducing plastic, choosing\nreusable products and keeping\nbeaches clean can help sea\nturtles survive in nature."
     },
     feedback: { good: PLATFORM_TEXT_RGB, bad: PLATFORM_TEXT_RGB, y: my(690), rgb: false },
     pipeline: ["bg", "animal", "finalTimer", "question", "footer", "feedback", "frame", "header"],
@@ -6043,7 +6127,7 @@ const posterRegistry = {
     headerLeading: ms(64),
     finalFooter: { text: "About 180 Griffon\nVultures left in Israel" },
     finalBody: {
-      text: "Smart everyday choices can help\nprotect vultures. Reducing waste,\nchoosing responsible products,\nand keeping nature clean can\nprevent harm to wildlife, protect\nfood chains, and help vulture\nsurvive across the Israeli skies."
+      text: "Smart everyday choices\ncan help protect vultures.\nReducing waste and keeping\nnature clean can help\nvultures survive across\nthe Israeli skies."
     },
     feedback: { rgb: true, y: my(690) },
     pipeline: ["bg", "animal", "question", "footer", "feedback", "frame", "header"],
@@ -6160,7 +6244,7 @@ const posterRegistry = {
     headerLeading: ms(64),
     finalFooter: { text: "46 Acacia Gazelles\nleft in Israel" },
     finalBody: {
-      text: "Smart everyday choices can help\nprotect acacia gazelles. Reducing\nwaste, choosing responsible\nproducts, and keeping nature clean\ncan prevent harm to wildlife,\npreserve fragile habitats, and\nhelp acacia gazelles survive."
+      text: "Smart everyday choices can\nhelp protect acacia gazelles.\nReducing waste, choosing\nresponsible products, and\nkeeping nature clean can\nhelp acacia gazelles survive."
     },
     textRgb: PLATFORM_TEXT_RGB,
     feedback: { rgb: true, y: my(700) },
@@ -6256,7 +6340,7 @@ const posterRegistry = {
     headerLeading: ms(18),
     finalFooter: { text: "Only a few populations\nremain in Israel" },
     finalBody: {
-      text: "Pelobates syriacus depends on\nseasonal ponds and clean wetlands\nto survive. Protecting fragile\nwetlands, reducing pollution, and\nmaking better everyday choices\ncan help this rare amphibian live\nsafely in its natural habitat."
+      text: "Pelobates syriacus depends\non seasonal ponds and clean\nwetlands to survive. Reducing\npollution and making better\nchoices can help them survive\nin their natural habitat."
     },
     feedback: { rgb: true, y: my(690) },
     pipeline: ["bg", "animal", "finalTimer", "question", "footer", "feedback", "frame", "header"],
@@ -6361,7 +6445,7 @@ const posterRegistry = {
     headerLeading: ms(64),
     finalFooter: { text: "About 1,000 Striped\nHyenas left in Israel" },
     finalBody: {
-      text: "Smart everyday choices can help\nprotect striped hyenas. Reducing\nwaste, choosing responsible\nproducts, and keeping nature\nclean can prevent harm to wildlife\nand help striped hyenas survive\nacross their natural habitats."
+      text: "Smart everyday choices can\nhelp protect striped hyenas.\nReducing waste and keeping\nnature clean can prevent\nharm to wildlife and help\nstriped hyenas survive."
     },
     feedback: { rgb: true, y: my(700) },
     pipeline: ["bg", "animal", "finalTimer", "question", "footer", "feedback", "frame", "header"],
@@ -6624,29 +6708,103 @@ function posterDrawBackground(p) {
   platformDrawMainBackground();
 }
 
+function platformHandlePosterBackPress() {
+  if (platformMode === "intro" || platformMode === "loading" || platformShareOpen) {
+    return false;
+  }
+
+  let p = posterRegistry[platformMode];
+  if (!p || !p.backButtonBox) {
+    return false;
+  }
+
+  if (platformWasBoxClicked(p.backButtonBox)) {
+    platformReturnToIntro();
+    return true;
+  }
+
+  return false;
+}
+
+function posterGetHeaderLineY() {
+  return POSTER_LAYOUT.headerLineY + POSTER_LAYOUT.headerNudgeY + POSTER_LAYOUT.headerLineNudgeY;
+}
+
+function posterGetHeaderLayout() {
+  let nameY = POSTER_LAYOUT.headerTextY + POSTER_LAYOUT.headerNudgeY;
+  let nameSize = ms(17);
+  let backSize = POSTER_LAYOUT.backButtonSize;
+  let contentX = POSTER_LAYOUT.headerTextX + POSTER_LAYOUT.headerBackNudgeX;
+  let backBox = {
+    x: contentX,
+    y: nameY + nameSize / 2 - backSize / 2 + POSTER_LAYOUT.headerBackNudgeY,
+    w: backSize,
+    h: backSize
+  };
+
+  return {
+    backBox,
+    nameX:
+      backBox.x +
+      backBox.w +
+      POSTER_LAYOUT.backButtonLabelGap +
+      POSTER_LAYOUT.headerNameNudgeX,
+    nameY,
+    nameSize,
+    backSize
+  };
+}
+
+function posterDrawBackButton(p, box, textColor) {
+  let hover =
+    !p.touchDevice &&
+    mouseX > box.x &&
+    mouseX < box.x + box.w &&
+    mouseY > box.y &&
+    mouseY < box.y + box.h;
+  let c = color(textColor);
+  c.setAlpha(hover ? 220 : 255);
+  noFill();
+  stroke(c);
+  strokeWeight(POSTER_LAYOUT.backButtonStrokeWeight);
+  strokeCap(ROUND);
+  strokeJoin(ROUND);
+
+  let glyph = POSTER_LAYOUT.backButtonGlyphSize;
+  let cx = box.x + box.w * 0.5;
+  let cy = box.y + box.h / 2;
+  let armLen = glyph * 0.18;
+  let spreadY = glyph * 0.24;
+  let tipX = cx - armLen;
+
+  line(cx, cy - spreadY, tipX, cy);
+  line(tipX, cy, cx, cy + spreadY);
+}
+
 function posterDrawFrame(p) {
   let cfg = p.cfg;
+  let lineY = posterGetHeaderLineY();
   strokeWeight(POSTER_LAYOUT.frameStrokeWeight);
   noFill();
   stroke(cfg.textColor);
-  line(
-    POSTER_LAYOUT.marginX,
-    POSTER_LAYOUT.headerLineY + POSTER_LAYOUT.headerNudgeY,
-    platformW - POSTER_LAYOUT.marginX,
-    POSTER_LAYOUT.headerLineY + POSTER_LAYOUT.headerNudgeY
-  );
+  line(POSTER_LAYOUT.marginX, lineY, platformW - POSTER_LAYOUT.marginX, lineY);
 }
 
 function posterDrawHeader(p) {
   let cfg = p.cfg;
+  let layout = posterGetHeaderLayout();
+  p.backButtonBox = layout.backBox;
+
+  posterDrawBackButton(p, layout.backBox, cfg.textColor);
+
   noStroke();
   fill(cfg.textColor);
   platformApplyGrungeFont(p.grungeFont);
   textStyle(NORMAL);
   textAlign(LEFT, TOP);
-  textSize(ms(20));
+  textSize(layout.nameSize);
   textLeading(cfg.headerLeading);
-  text(cfg.headerTitle, POSTER_LAYOUT.headerTextX, POSTER_LAYOUT.headerTextY + POSTER_LAYOUT.headerNudgeY);
+  text(cfg.headerTitle, layout.nameX, layout.nameY);
 }
 
 function posterDrawQuestionUI(p) {
@@ -6710,13 +6868,17 @@ function posterDrawFinalMessage(p, alphaOverride = null) {
   let leftCellX = POSTER_LAYOUT.marginX;
 
   let bodySize = ms(20);
-  let bodyLeading = ms(20);
+  let bodyLeading = platformGetFinalBodyLeading(cfg);
   textSize(bodySize);
   textLeading(bodyLeading);
-  let bodyBlockH =
-    (POSTER_LAYOUT.finalBodyLineCount - 1) * bodyLeading + bodySize;
+  let bodyLineCount = cfg.finalBody.text.split("\n").length;
+  let bodyBlockH = (bodyLineCount - 1) * bodyLeading + bodySize;
   let bodyY = platformGetFinalBodyTopY() + POSTER_LAYOUT.finalContentYOffset + POSTER_LAYOUT.finalMessageNudgeY;
-  let bodyX = POSTER_LAYOUT.finalBodyX + POSTER_LAYOUT.finalBodyXOffset;
+  let bodyX =
+    POSTER_LAYOUT.finalBodyX +
+    POSTER_LAYOUT.finalBodyXOffset +
+    POSTER_LAYOUT.finalBodyXNudge +
+    (cfg.finalBody.xOffset ?? 0);
 
   textSize(platformText.finalTitle.size);
   textLeading(platformText.finalTitle.leading);
@@ -6855,11 +7017,26 @@ function posterHandleChoicePress(id) {
 }
 
 function posterMousePressed(id) {
+  if (posterHandleNavigationPress(id)) {
+    return;
+  }
   posterHandleChoicePress(id);
+}
+
+function posterHandleNavigationPress(id) {
+  let p = posterRegistry[id];
+  if (p?.backButtonBox && platformWasBoxClicked(p.backButtonBox)) {
+    platformReturnToIntro();
+    return true;
+  }
+  return false;
 }
 
 function posterTouchStarted(id) {
   posterRegistry[id].touchDevice = true;
+  if (posterHandleNavigationPress(id)) {
+    return false;
+  }
   posterHandleChoicePress(id);
   return false;
 }
