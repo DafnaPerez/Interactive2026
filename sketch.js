@@ -49,6 +49,92 @@ const REF_H = 975;
 const platformW = 390;
 const platformH = 844;
 let platformScreenScale = 1;
+let platformScreenScaleX = 1;
+let platformScreenScaleY = 1;
+let platformDebugLayoutSig = "";
+let platformLastLayoutTighten = 1;
+
+function platformDebugLogLayout(runId) {
+  let vp = platformGetViewportSize();
+  let tighten = platformGetLayoutYTighten();
+  let cssW = platformW * platformScreenScaleX;
+  let cssH = platformH * platformScreenScaleY;
+  let sig =
+    vp.w +
+    "x" +
+    vp.h +
+    "@" +
+    platformScreenScaleX.toFixed(4) +
+    "x" +
+    platformScreenScaleY.toFixed(4) +
+    "t" +
+    tighten.toFixed(4);
+  if (sig === platformDebugLayoutSig) {
+    return;
+  }
+  platformDebugLayoutSig = sig;
+
+  // #region agent log
+  fetch(
+    "http://127.0.0.1:7772/ingest/d94715ef-8978-41e7-89f8-eab3e6be6d17",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "d1cd07"
+      },
+      body: JSON.stringify({
+        sessionId: "d1cd07",
+        location: "sketch.js:platformDebugLogLayout",
+        message: "viewport layout snapshot",
+        data: {
+          vpW: vp.w,
+          vpH: vp.h,
+          innerW: typeof window !== "undefined" ? window.innerWidth : null,
+          innerH: typeof window !== "undefined" ? window.innerHeight : null,
+          vvW:
+            typeof window !== "undefined" && window.visualViewport
+              ? window.visualViewport.width
+              : null,
+          vvH:
+            typeof window !== "undefined" && window.visualViewport
+              ? window.visualViewport.height
+              : null,
+          screenScale: platformScreenScale,
+          tighten,
+          canvasAspect: platformW / platformH,
+          vpAspect: vp.w / vp.h,
+          cssW,
+          cssH,
+          layoutMode: "width-fill-top-fit",
+          scaleX: platformScreenScaleX,
+          scaleY: platformScreenScaleY,
+          layoutTighten: platformGetLayoutYTighten(),
+          anchorMode: cssH > vp.h + 0.5 ? "top" : "center",
+          cropX: cssW - vp.w,
+          cropY: cssH - vp.h,
+          questionTitleY: platformText.questionTitle.y,
+          choiceY: POSTER_LAYOUT.choiceY,
+          headerLineY: POSTER_LAYOUT.headerLineY,
+          answerTop: POSTER_LAYOUT.answerTop,
+          footerTop: POSTER_LAYOUT.footerTop,
+          animalAnchorY: my(ANIMAL_ANCHOR_Y),
+          animalAnchorTuckedY: platformTuckRefY(ANIMAL_ANCHOR_Y),
+          mxRatio: platformW / REF_W,
+          myRatio: platformH / REF_H,
+          containScale: min(vp.w / platformW, vp.h / platformH),
+          coverScale: max(vp.w / platformW, vp.h / platformH),
+          userAgent:
+            typeof navigator !== "undefined" ? navigator.userAgent : null
+        },
+        timestamp: Date.now(),
+        runId: runId || "post-fix",
+        hypothesisId: "A-E"
+      })
+    }
+  ).catch(() => {});
+  // #endregion
+}
 
 function mx(x) {
   return x * platformW / REF_W;
@@ -72,10 +158,169 @@ const ANIMAL_ANCHOR_Y = 400;
 const ANIMAL_SCREEN_OFFSET_Y = 50;
 const DEER_HYENA_EXTRA_SCREEN_OFFSET_Y = 20;
 const INTRO_TRIANGLES_OFFSET_Y = -50;
+const INTRO_SCREEN_NUDGE_Y = ms(50);
+const PLATFORM_SHARE_OVERLAY_NUDGE_Y = -ms(50);
+
+const WRONG_WAIT_FRAMES = 60; // 1 s pause
+const WRONG_RISE_FRAMES = 38;
+const WRONG_OFFSCREEN_Y = platformH * 1.7;
+
+function wrongFallGetRiseScreenY(p) {
+  if (!p.wrongRiseActive) return 0;
+  let t = constrain(p.wrongRiseT / WRONG_RISE_FRAMES, 0, 1);
+  let ease = (1 - t) * (1 - t);
+  return ease * WRONG_OFFSCREEN_Y;
+}
+
+function wrongFallGetRiseT(p) {
+  if (!p.wrongRiseActive) return 1;
+  return constrain(p.wrongRiseT / WRONG_RISE_FRAMES, 0, 1);
+}
+
+// Build random fall params for UI elements (title, progress, choices).
+// All start near frame 0 so they feel like one group, but with slight variation.
+function wrongFallBuildUIElements() {
+  function el(delayF, fallF, driftX, rotDir) {
+    return { delayF, fallF, driftX, rotDir };
+  }
+  let lx = random(-1, -0.25) * ms(80);
+  let rx = random(0.25, 1)   * ms(80);
+  return {
+    choiceL:  el(floor(random(0, 4)),  floor(random(44, 58)), lx, random(-0.7, 0) * 0.18),
+    choiceR:  el(floor(random(0, 4)),  floor(random(44, 58)), rx, random(0, 0.7)  * 0.18),
+    question: el(floor(random(0, 3)),  floor(random(46, 60)), random(-0.4, 0.4) * ms(40), random(-0.15, 0.15) * 0.1),
+    progress: el(floor(random(0, 4)),  floor(random(42, 56)), random(-0.5, 0.5) * ms(50), 0)
+  };
+}
+
+// Build per-piece fall params for a given number of pieces.
+function wrongFallBuildPieces(totalPieces) {
+  let arr = [];
+  for (let i = 0; i < totalPieces; i++) {
+    arr.push({
+      delayF: floor(random(0, 18)),           // staggered start
+      fallF:  floor(random(26, 46)),           // each piece has its own duration
+      driftX: random(-1, 1) * ms(95),         // random left/right
+      rotDir: random(-1, 1) * 0.32,           // random spin
+      wobble: random(0.5, 1.4)               // swing intensity
+    });
+  }
+  return arr;
+}
+
+// Screen-space Y offset for a piece during fall/wait phase.
+// Returns a screen-px value (to be converted to animal-space inside the draw transform).
+function wrongFallGetPieceScreenY(p, index) {
+  if (!p.wrongFallPieces || !p.wrongFallPieces[index]) return 0;
+  let el = p.wrongFallPieces[index];
+
+  if (p.wrongFallActive) {
+    let raw = p.wrongFallT - el.delayF;
+    if (raw <= 0) return 0;
+    let t    = constrain(raw / el.fallF, 0, 1);
+    let ease = t * t * t;
+    return ease * WRONG_OFFSCREEN_Y;
+  }
+  if (p.wrongWaitActive) return WRONG_OFFSCREEN_Y;
+  if (p.wrongRiseActive) return wrongFallGetRiseScreenY(p);
+  return 0;
+}
+
+function wrongFallGetPieceScreenX(p, index) {
+  if (!p.wrongFallPieces || !p.wrongFallPieces[index]) return 0;
+  let el = p.wrongFallPieces[index];
+
+  if (p.wrongFallActive) {
+    let raw = p.wrongFallT - el.delayF;
+    if (raw <= 0) return 0;
+    let t    = constrain(raw / el.fallF, 0, 1);
+    let ease = t * t * t;
+    let swing = sin(raw * 0.28 + index * 0.7) * el.wobble * ms(22) * t;
+    return el.driftX * ease + swing;
+  }
+  if (p.wrongWaitActive) return el.driftX;
+  if (p.wrongRiseActive) {
+    let riseT = wrongFallGetRiseT(p);
+    return el.driftX * (1 - riseT);
+  }
+  return 0;
+}
+
+function wrongFallGetPieceRot(p, index) {
+  if (!p.wrongFallPieces || !p.wrongFallPieces[index]) return 0;
+  let el = p.wrongFallPieces[index];
+
+  if (p.wrongFallActive) {
+    let raw = p.wrongFallT - el.delayF;
+    if (raw <= 0) return 0;
+    let t = constrain(raw / el.fallF, 0, 1);
+    return el.rotDir * t * t * t;
+  }
+  if (p.wrongWaitActive) return el.rotDir;
+  if (p.wrongRiseActive) return el.rotDir * (1 - wrongFallGetRiseT(p));
+  return 0;
+}
+
+// Returns {x, y, rot} for a UI element during fall/rise.
+function wrongFallGetElemTransform(p, key) {
+  if (!p.wrongFallEls) return { x:0, y:0, rot:0 };
+  let el = p.wrongFallEls[key];
+  if (!el) return { x:0, y:0, rot:0 };
+
+  let fallDist = WRONG_OFFSCREEN_Y;
+
+  if (p.wrongFallActive) {
+    let raw = p.wrongFallT - el.delayF;
+    if (raw <= 0) return { x:0, y:0, rot:0 };
+    let t    = constrain(raw / el.fallF, 0, 1);
+    let ease = t * t * t;
+    let swing = sin(raw * 0.28) * ms(14) * t;
+    return { x: el.driftX * ease + swing, y: ease * fallDist, rot: el.rotDir * ease };
+  }
+  if (p.wrongWaitActive) {
+    return { x: el.driftX, y: fallDist, rot: el.rotDir };
+  }
+  if (p.wrongRiseActive) {
+    let riseT = wrongFallGetRiseT(p);
+    return { x: el.driftX * (1 - riseT), y: wrongFallGetRiseScreenY(p), rot: el.rotDir * (1 - riseT) };
+  }
+  return { x:0, y:0, rot:0 };
+}
+
+// Convert screen-px fall/rise offset into the local coords of a piece draw path.
+function wrongFallGetPieceDrawOffset(p, index, cfg) {
+  if (!p.wrongFallActive && !p.wrongWaitActive && !p.wrongRiseActive) {
+    return { x: 0, y: 0, rot: 0 };
+  }
+
+  let canvasScale = platformW / ANIMAL_REF_W;
+  let sx = canvasScale;
+  let sy = canvasScale;
+
+  if (cfg?.id === "hyena" && p.hyena) {
+    sx *= p.hyena.scale;
+    sy *= p.hyena.scale;
+  } else {
+    let dt = platformLooseGetDrawTransform(cfg);
+    sx *= dt.scaleX || 1;
+    sy *= dt.scaleY || 1;
+  }
+
+  return {
+    x: wrongFallGetPieceScreenX(p, index) / sx,
+    y: wrongFallGetPieceScreenY(p, index) / sy,
+    rot: wrongFallGetPieceRot(p, index)
+  };
+}
+const PLATFORM_SHARE_BACKDROP_DARKEN = 0.82;
+const PLATFORM_SHARE_BACKDROP_BLUR_PX = 22;
+const PLATFORM_SHARE_CLOSE_SIZE = ms(54);
+const PLATFORM_SHARE_BACK_NUDGE_Y = ms(10);
+const PLATFORM_SHARE_ICONS_NUDGE_Y = ms(10);
 const PLATFORM_LOADING_TRIANGLE_SIZE = mx(72);
 
 function platformGetLoadingTriangleCy() {
-  return my(420) + INTRO_TRIANGLES_OFFSET_Y + 25;
+  return platformLayoutY(420) + INTRO_TRIANGLES_OFFSET_Y + ms(25);
 }
 
 function platformScreenPxToAnimalRefY(screenPx) {
@@ -102,7 +347,7 @@ function posterDrawAnimalMobile(p) {
   let s = platformW / ANIMAL_REF_W;
   translate(
     platformW / 2 + shake.x,
-    my(ANIMAL_ANCHOR_Y) + ANIMAL_SCREEN_OFFSET_Y + shake.y
+    platformLayoutY(ANIMAL_ANCHOR_Y) + ms(ANIMAL_SCREEN_OFFSET_Y) + shake.y
   );
   rotate(shake.rot);
   scale(s);
@@ -236,7 +481,7 @@ const platformText = {
 
   share: {
     title: "Share this poster",
-    body: "Help friends discover how everyday choices can protect the israeli wildlife.",
+    body: "Help friends discover how everyday choices\ncan protect the israeli wildlife.",
     whatsapp: "WhatsApp",
     instagram: "Instagram",
     facebook: "Facebook",
@@ -425,7 +670,11 @@ function platformGetFinalCtaLayout(p) {
   let cfg = p.cfg;
   let bodySize = ms(20);
   let bodyLeading = platformGetFinalBodyLeading(cfg);
-  let bodyY = platformGetFinalBodyTopY() + POSTER_LAYOUT.finalContentYOffset + POSTER_LAYOUT.finalMessageNudgeY;
+  let bodyY =
+    platformGetFinalBodyTopY() +
+    POSTER_LAYOUT.finalContentYOffset +
+    POSTER_LAYOUT.finalMessageNudgeY +
+    POSTER_LAYOUT.finalPosterNudgeY;
   let bodyLineCount = cfg.finalBody.text.split("\n").length;
   let actualBodyBlockH = (bodyLineCount - 1) * bodyLeading + bodySize;
   let referenceBodyBlockH =
@@ -694,11 +943,11 @@ function platformGetShareOverlayLayout(p) {
   let cardW = platformW - mx(52);
   let cardX = (platformW - cardW) / 2;
   let cardH = cardW;
-  let cardY = (platformH - cardH) / 2;
+  let cardY = (platformH - cardH) / 2 + PLATFORM_SHARE_OVERLAY_NUDGE_Y;
 
   let pad = ms(18);
   let shareTouchSize = ms(44);
-  let closeSize = shareTouchSize;
+  let closeSize = PLATFORM_SHARE_CLOSE_SIZE;
   let titleSize = platformText.finalCta.size;
   let bodySize = ms(20);
   let bodyLeading = ms(22);
@@ -733,8 +982,9 @@ function platformGetShareOverlayLayout(p) {
     backH -
     ms(16) -
     previewShrinkH;
-  let iconsY = previewY + previewH + iconHit * 0.5 - 8 + ms(16);
-  let backY = iconsY + iconHit * 0.5 + ms(15);
+  let iconsRowY = previewY + previewH + iconHit * 0.5 - 8 + ms(16);
+  let iconsY = iconsRowY + PLATFORM_SHARE_ICONS_NUDGE_Y;
+  let backY = iconsRowY + iconHit * 0.5 + ms(15) + PLATFORM_SHARE_BACK_NUDGE_Y;
   let iconCenters = [
     cardX + cardW * 0.38,
     cardX + cardW * 0.5,
@@ -895,6 +1145,27 @@ function platformDrawShareOptionButton(box, alpha, hover, iconR) {
   imageMode(CORNER);
 }
 
+function platformDrawShareBackdrop(shadeAlpha) {
+  if (shadeAlpha <= 0) {
+    return;
+  }
+
+  let snap = get(0, 0, platformW, platformH);
+  let ctx = drawingContext;
+  ctx.save();
+  // Clip to canvas so blurred edges never spill outside
+  ctx.beginPath();
+  ctx.rect(0, 0, platformW, platformH);
+  ctx.clip();
+  ctx.filter = `blur(${PLATFORM_SHARE_BACKDROP_BLUR_PX}px)`;
+  ctx.drawImage(snap.canvas, 0, 0, platformW, platformH);
+  ctx.filter = "none";
+  let a = (shadeAlpha / 255) * PLATFORM_SHARE_BACKDROP_DARKEN;
+  ctx.fillStyle = `rgba(${PLATFORM_TEXT_RGB[0]},${PLATFORM_TEXT_RGB[1]},${PLATFORM_TEXT_RGB[2]},${a})`;
+  ctx.fillRect(0, 0, platformW, platformH);
+  ctx.restore();
+}
+
 function platformDrawShareCardBackground(card) {
   let ctx = drawingContext;
   let r = ms(18);
@@ -967,10 +1238,7 @@ function platformDrawShareOverlay() {
   push();
   rectMode(CORNER);
   noStroke();
-  if (shadeAlpha > 0) {
-    fill(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], shadeAlpha * 0.46);
-    rect(0, 0, platformW, platformH);
-  }
+  platformDrawShareBackdrop(shadeAlpha);
 
   platformDrawShareCardBackground(card);
 
@@ -1133,9 +1401,9 @@ function platformGetAnimatedTrianglePoints(index) {
   let rp2 = platformRotatePoint(p2[0], p2[1], cx, cy, rot);
 
   return [
-    [mx(rp0[0] + floatX), platformTuckRefY(rp0[1] + floatY) + INTRO_TRIANGLES_OFFSET_Y],
-    [mx(rp1[0] + floatX), platformTuckRefY(rp1[1] + floatY) + INTRO_TRIANGLES_OFFSET_Y],
-    [mx(rp2[0] + floatX), platformTuckRefY(rp2[1] + floatY) + INTRO_TRIANGLES_OFFSET_Y]
+    [mx(rp0[0] + floatX), platformLayoutY(rp0[1] + floatY) + INTRO_TRIANGLES_OFFSET_Y + INTRO_SCREEN_NUDGE_Y],
+    [mx(rp1[0] + floatX), platformLayoutY(rp1[1] + floatY) + INTRO_TRIANGLES_OFFSET_Y + INTRO_SCREEN_NUDGE_Y],
+    [mx(rp2[0] + floatX), platformLayoutY(rp2[1] + floatY) + INTRO_TRIANGLES_OFFSET_Y + INTRO_SCREEN_NUDGE_Y]
   ];
 }
 
@@ -1289,7 +1557,10 @@ function platformGetLoadingStartIndex() {
 
 function platformGetLoadingTriangleRefPts(index) {
   let animal = platformAnimals[index];
-  return animal.pts.map((p) => [mx(p[0]), my(p[1]) + INTRO_TRIANGLES_OFFSET_Y]);
+  return animal.pts.map((p) => [
+    mx(p[0]),
+    platformLayoutY(p[1]) + INTRO_TRIANGLES_OFFSET_Y
+  ]);
 }
 
 function platformSortTriangleVerts(pts) {
@@ -1436,7 +1707,7 @@ function platformDrawLoading() {
     hintWordGap
   );
   let hintBlockH = (hintLines.length - 1) * hintLeading + hintSize;
-  let hintY = (platformH - hintBlockH) / 2;
+  let hintY = platformText.loadingHint.y;
 
   platformDrawWrappedCenterText(
     platformText.loadingHint.text,
@@ -1575,9 +1846,9 @@ function platformTriggerWrongFeedback(animalId, side) {
   p.pulse.wrongShake = 16;
   p.pulse.pieceShake = 42;
   p.pulse.pieceShakeKind = "bad";
-  p.feedback.text = "Try again";
+  p.feedback.text = "";
   p.feedback.good = false;
-  p.feedback.timer = 80;
+  p.feedback.timer = 0;
 }
 
 function platformUpdateFeedbackTimers(animalId) {
@@ -1634,14 +1905,12 @@ function platformGetViewportSize() {
   if (window.visualViewport) {
     let vv = window.visualViewport;
     w = vv.width;
-    h = min(vv.height, h);
+    h = vv.height;
   }
 
   return { w, h };
 }
 
-const PLATFORM_LAYOUT_Y_ANCHOR = REF_H * 0.52;
-const PLATFORM_LAYOUT_Y_TIGHTEN_MIN = 0.84;
 const PLATFORM_FEEDBACK_REF_Y = {
   turtle: 690,
   eagle: 690,
@@ -1650,52 +1919,111 @@ const PLATFORM_FEEDBACK_REF_Y = {
   hyena: 700
 };
 
+const PLATFORM_POSTER_Y_REFS = {
+  turtle: { glowCy: 400, compTop: 96, compBottom: 698 },
+  eagle: { compTop: 100, scatterTop: 208, headerFloorInit: 128, headerFloorAdjust: 200 },
+  deer: { glowCy: 430, compTop: 96, compBottom: 698 },
+  toad: { compTop: 96, compBottom: 698 },
+  hyena: {}
+};
+
 function platformGetLayoutYTighten() {
   let vp = platformGetViewportSize();
-  let scaleW = vp.w / platformW;
-  let scaleH = vp.h / platformH;
-  if (scaleH >= scaleW * 0.98) {
+  let scale = vp.w / platformW;
+  let scaledCanvasH = platformH * scale;
+  if (vp.h >= scaledCanvasH * 0.985) {
     return 1;
   }
-  return constrain(scaleH / scaleW, PLATFORM_LAYOUT_Y_TIGHTEN_MIN, 1);
+  // Scale Y from the top — keeps header up and footer down without
+  // collapsing everything toward the vertical center.
+  return vp.h / scaledCanvasH;
 }
 
 function platformTuckRefY(refY) {
-  let tighten = platformGetLayoutYTighten();
-  if (tighten >= 0.999) {
-    return my(refY);
-  }
-  let tuckedRef =
-    PLATFORM_LAYOUT_Y_ANCHOR + (refY - PLATFORM_LAYOUT_Y_ANCHOR) * tighten;
-  return my(tuckedRef);
+  return platformLayoutY(refY);
 }
 
 function platformUpdateViewportFit() {
   let vp = platformGetViewportSize();
-  // Full-bleed cover keeps the gradient edge-to-edge like the original design.
-  platformScreenScale = max(vp.w / platformW, vp.h / platformH);
+  // Uniform width-fill scale — no stretching, no side letterboxing.
+  platformScreenScale = vp.w / platformW;
+  platformScreenScaleX = platformScreenScale;
+  platformScreenScaleY = platformScreenScale;
+}
+
+function platformLayoutY(refY) {
+  return my(refY) * platformGetLayoutYTighten();
+}
+
+function platformApplyPosterViewportLayouts() {
+  POSTER_LAYOUT.looseDefaultTop = platformLayoutY(120);
+  POSTER_LAYOUT.looseDefaultBottom = platformLayoutY(720);
+  POSTER_LAYOUT.choiceKeepOutTop = platformLayoutY(670);
+  POSTER_LAYOUT.eagleScatterTop = platformLayoutY(208);
+  POSTER_LAYOUT.eagleHeaderFloorInit = platformLayoutY(128);
+  POSTER_LAYOUT.eagleHeaderFloorAdjust = platformLayoutY(200);
+
+  for (let id in posterRegistry) {
+    let p = posterRegistry[id];
+    let refs = PLATFORM_POSTER_Y_REFS[id];
+    if (!p || !refs) {
+      continue;
+    }
+
+    if (p.cfg.glow && refs.glowCy != null) {
+      p.cfg.glow.cy = platformLayoutY(refs.glowCy);
+    }
+
+    let composition = p.cfg.loosePiece && p.cfg.loosePiece.composition;
+    if (composition && refs.compTop != null) {
+      composition.top = platformLayoutY(refs.compTop);
+      composition.bottom =
+        refs.compBottom != null
+          ? platformLayoutY(refs.compBottom)
+          : POSTER_LAYOUT.choiceY - ms(48);
+    }
+
+    let keepOut = p.cfg.loosePiece && p.cfg.loosePiece.choiceKeepOut;
+    if (keepOut) {
+      keepOut.top = POSTER_LAYOUT.choiceY;
+      keepOut.bottom = platformH;
+    }
+  }
 }
 
 function platformApplyViewportLayout() {
   platformUpdateViewportFit();
 
-  platformText.introTitle.y = platformTuckRefY(110) + 20;
-  platformText.introHint.y = platformTuckRefY(620) + 160;
-  platformText.loadingHint.y = platformTuckRefY(560);
-  platformText.questionTitle.y = platformTuckRefY(920) + POSTER_LAYOUT.questionPhaseNudgeY;
-  POSTER_LAYOUT.headerLineY = platformTuckRefY(60) + 20;
-  POSTER_LAYOUT.headerTextY = platformTuckRefY(34) + ms(5) + 20;
+  platformText.introTitle.y = platformLayoutY(110) + ms(20) + INTRO_SCREEN_NUDGE_Y;
+  platformText.introHint.y = platformLayoutY(620) + ms(160) + INTRO_SCREEN_NUDGE_Y;
+  platformText.loadingHint.y = platformLayoutY(560) - ms(120);
+  platformText.questionTitle.y =
+    platformLayoutY(920) + POSTER_LAYOUT.questionPhaseNudgeY;
+  POSTER_LAYOUT.headerLineY = platformLayoutY(60) + ms(20);
+  POSTER_LAYOUT.headerTextY = platformLayoutY(34) + ms(5) + ms(20);
   POSTER_LAYOUT.choiceY =
     platformText.questionTitle.y - ms(168) - ms(45);
+  POSTER_LAYOUT.answerTop = platformLayoutY(715);
+  POSTER_LAYOUT.footerTop = platformLayoutY(882);
+  POSTER_LAYOUT.finalTextCenterOffset = platformLayoutY(24);
 
   for (let id in PLATFORM_FEEDBACK_REF_Y) {
     let p = posterRegistry[id];
     if (p && p.cfg && p.cfg.feedback) {
-      p.cfg.feedback.y = platformTuckRefY(PLATFORM_FEEDBACK_REF_Y[id]);
+      p.cfg.feedback.y = platformLayoutY(PLATFORM_FEEDBACK_REF_Y[id]);
     }
   }
 
+  platformApplyPosterViewportLayouts();
+
+  let tighten = platformGetLayoutYTighten();
+  if (abs(tighten - platformLastLayoutTighten) > 0.001) {
+    platformLastLayoutTighten = tighten;
+    platformClearSharedPosterCaches();
+  }
+
   platformFitCanvasToScreen();
+  platformDebugLogLayout();
 }
 
 function platformBindViewportListeners() {
@@ -1735,7 +2063,18 @@ function platformFitCanvasToScreen() {
   if (typeof window !== "undefined" && window.visualViewport) {
     let vv = window.visualViewport;
     cnv.style.left = vv.offsetLeft + (vv.width - cssW) / 2 + "px";
-    cnv.style.top = vv.offsetTop + (vv.height - cssH) / 2 + "px";
+    // Center when the canvas fits; when taller than the visible area, pin to the
+    // visual top so Chrome does not center-crop the header. Layout tuck handles
+    // the footer on short viewports.
+    if (cssH > vv.height + 0.5) {
+      let chromeInset = max(
+        0,
+        window.innerHeight - vv.height - vv.offsetTop
+      );
+      cnv.style.top = vv.offsetTop + min(chromeInset, 10) + "px";
+    } else {
+      cnv.style.top = vv.offsetTop + (vv.height - cssH) / 2 + "px";
+    }
   } else {
     cnv.style.left = "50%";
     cnv.style.top = "50%";
@@ -1778,6 +2117,7 @@ function platformSmoothStep(edge0, edge1, x) {
 const platformLooseTargetCache = {};
 const platformLooseGroupBBoxCache = {};
 const platformPelobatesTargetCache = {};
+let platformLooseRepelFrameCache = null;
 const platformChoiceImageVisualOffsetCache = new WeakMap();
 const platformLooseLayoutVersion = 93;
 const PLATFORM_LOOSE_ROT_PAD = 24;
@@ -1828,8 +2168,8 @@ function platformLooseDefaultComposition() {
   return {
     left: mx(16),
     right: platformW - mx(16),
-    top: my(120),
-    bottom: my(720),
+    top: platformLayoutY(120),
+    bottom: platformLayoutY(720),
     pad: ms(4),
     edgePad: ms(12)
   };
@@ -1877,7 +2217,8 @@ function platformLooseResolveProfile(cfg) {
     zonePushRuntime: lp.zonePushRuntime ?? true,
     dampenWobbleNearBody: lp.dampenWobbleNearBody ?? true,
     hyenaStyleRepel: lp.hyenaStyleRepel ?? false,
-    assembledScreenLift: lp.assembledScreenLift ?? 0
+    assembledScreenLift: lp.assembledScreenLift ?? 0,
+    assembledHomeNudgeY: lp.assembledHomeNudgeY ?? 0
   };
 }
 
@@ -2128,7 +2469,7 @@ function platformLoosePushFromChoiceKeepOut(cfg, offsetX, offsetY, index, rot) {
   let forbid = {
     left: keepOut.left ?? mx(16),
     right: keepOut.right ?? platformW - mx(16),
-    top: keepOut.top ?? my(670),
+    top: keepOut.top ?? platformLayoutY(670),
     bottom: keepOut.bottom ?? platformH
   };
   let ox = offsetX;
@@ -2455,7 +2796,7 @@ function platformLooseCircularAdjustLooseTargets(targets, cfg) {
     let keepOut = platformLooseGetProfile(cfg).choiceKeepOut;
     let ceilingScreenY =
       keepOut ? keepOut.top - ms(40) : platformH;
-    let headerFloor = my(128);
+    let headerFloor = POSTER_LAYOUT.eagleHeaderFloorInit;
 
     for (let i = 0; i < targets.length; i++) {
       let rot = platformLooseGetPieceRot(cfg, i);
@@ -2495,7 +2836,7 @@ function platformLooseCircularAdjustLooseTargets(targets, cfg) {
 function eagleAssignScatterSlots(targets, cfg) {
   let left = mx(12);
   let right = platformW - mx(12);
-  let top = my(208);
+  let top = POSTER_LAYOUT.eagleScatterTop;
   let bottom = POSTER_LAYOUT.choiceY - ms(54);
   let slotUV = [
     [0.82, 0.04], [0.96, 0.03], [0.70, 0.07], [0.90, 0.13],
@@ -2610,24 +2951,7 @@ function platformLooseComputeRepelCleared(
       index,
       pieceT
     );
-    cleared = platformLooseRepelFromConnectedPieces(
-      p,
-      pieceGroup,
-      cleared.x,
-      cleared.y,
-      rot,
-      index,
-      pieceT
-    );
 
-    cleared = platformLooseClearLooseFromConnectedBBox(
-      cleared.x,
-      cleared.y,
-      p,
-      pieceGroup,
-      index,
-      rot
-    );
     cleared = platformLooseClearLooseFromConnectedBBox(
       cleared.x,
       cleared.y,
@@ -2935,7 +3259,7 @@ function platformLooseClearLooseFromConnectedBBox(
   let ox = offsetX;
   let oy = offsetY;
 
-  for (let pass = 0; pass < 4; pass++) {
+  for (let pass = 0; pass < 2; pass++) {
     let moved = false;
 
     for (let g = 0; g < 4; g++) {
@@ -3320,7 +3644,7 @@ function eagleAdjustLooseTargets(targets, cfg) {
   let keepOut = platformLooseGetProfile(cfg).choiceKeepOut;
   let ceilingScreenY =
     keepOut ? keepOut.top - (keepOut.pad ?? ms(10)) - ms(6) : platformH;
-  let headerFloor = my(200);
+  let headerFloor = POSTER_LAYOUT.eagleHeaderFloorAdjust;
 
   for (let i = 0; i < targets.length; i++) {
     let box = platformLoosePieceScreenBBox(cfg, targets[i].x, targets[i].y, i, 0, true);
@@ -3546,15 +3870,6 @@ function platformLooseApplyGroupedRepel(
     index,
     pieceT
   );
-  cleared = platformLooseComputeRepelCleared(
-    p,
-    pieceGroup,
-    cleared.x,
-    cleared.y,
-    rot,
-    index,
-    pieceT
-  );
 
   if (profile.hyenaStyleRepel) {
     let connectedGroups = 0;
@@ -3565,7 +3880,8 @@ function platformLooseApplyGroupedRepel(
       }
     }
 
-    let bboxPasses = p.cfg.id === "toad" ? min(14, 8 + connectedGroups * 2) : 4;
+    let bboxPasses =
+      p.cfg.id === "toad" ? min(6, 3 + connectedGroups) : 3;
 
     for (let pass = 0; pass < bboxPasses; pass++) {
       cleared = platformLooseClearLooseFromConnectedBBox(
@@ -4139,17 +4455,19 @@ function platformLooseBuildLayout(count, opts = {}) {
 
 function platformAnimalRefToScreen(ax, ay) {
   let s = platformW / ANIMAL_REF_W;
+  let anchorY = platformLayoutY(ANIMAL_ANCHOR_Y) + ms(ANIMAL_SCREEN_OFFSET_Y);
   return {
     x: platformW / 2 + (ax - ANIMAL_REF_W / 2) * s,
-    y: my(ANIMAL_ANCHOR_Y) + ANIMAL_SCREEN_OFFSET_Y + (ay - ANIMAL_ANCHOR_Y) * s
+    y: anchorY + (ay - ANIMAL_ANCHOR_Y) * s
   };
 }
 
 function platformScreenToAnimalRef(sx, sy) {
   let s = platformW / ANIMAL_REF_W;
+  let anchorY = platformLayoutY(ANIMAL_ANCHOR_Y) + ms(ANIMAL_SCREEN_OFFSET_Y);
   return {
     x: (sx - platformW / 2) / s + ANIMAL_REF_W / 2,
-    y: (sy - my(ANIMAL_ANCHOR_Y) - ANIMAL_SCREEN_OFFSET_Y) / s + ANIMAL_ANCHOR_Y
+    y: (sy - anchorY) / s + ANIMAL_ANCHOR_Y
   };
 }
 
@@ -4308,14 +4626,14 @@ function platformLooseApplyScreenSepToMesh(cfg, pivot, offsetX, offsetY, dxScree
   };
 }
 
-function platformLooseGetConnectedGroupUnionBBox(p, groupIndex) {
-  let cfg = p.cfg;
-  let groupT = platformLooseGetRepelGroupT(p, groupIndex);
+function platformLooseBeginRepelFrame(p) {
+  platformLooseRepelFrameCache = {
+    key: (p.cfg.id || "poster") + "|" + p.tGroup.join(","),
+    boxes: {}
+  };
+}
 
-  if (platformLooseAssemblerRepelWeight(groupT) <= 0) {
-    return null;
-  }
-
+function platformLooseBuildConnectedGroupUnionBBox(cfg, groupIndex) {
   let box = null;
 
   for (let j = 0; j < cfg.totalPieces; j++) {
@@ -4323,20 +4641,7 @@ function platformLooseGetConnectedGroupUnionBBox(p, groupIndex) {
       continue;
     }
 
-    let repelOff = platformLooseGetConnectedPieceRepelOffset(p, j);
-
-    if (!repelOff) {
-      continue;
-    }
-
-    let pieceBox = platformLoosePieceScreenBBox(
-      cfg,
-      repelOff.x,
-      repelOff.y,
-      j,
-      repelOff.rot,
-      false
-    );
+    let pieceBox = platformLoosePieceScreenBBox(cfg, 0, 0, j, 0, false);
     let asmPad = ms(8);
     pieceBox = {
       left: pieceBox.left - asmPad,
@@ -4348,6 +4653,31 @@ function platformLooseGetConnectedGroupUnionBBox(p, groupIndex) {
   }
 
   return box;
+}
+
+function platformLooseGetConnectedGroupUnionBBox(p, groupIndex) {
+  let cfg = p.cfg;
+  let groupT = platformLooseGetRepelGroupT(p, groupIndex);
+
+  if (platformLooseAssemblerRepelWeight(groupT) <= 0) {
+    return null;
+  }
+
+  if (
+    platformLooseRepelFrameCache &&
+    platformLooseRepelFrameCache.key ===
+      (cfg.id || "poster") + "|" + p.tGroup.join(",")
+  ) {
+    if (groupIndex in platformLooseRepelFrameCache.boxes) {
+      return platformLooseRepelFrameCache.boxes[groupIndex];
+    }
+
+    let box = platformLooseBuildConnectedGroupUnionBBox(cfg, groupIndex);
+    platformLooseRepelFrameCache.boxes[groupIndex] = box;
+    return box;
+  }
+
+  return platformLooseBuildConnectedGroupUnionBBox(cfg, groupIndex);
 }
 
 function platformLooseRepelFromConnectedPieces(
@@ -4377,8 +4707,9 @@ function platformLooseRepelFromConnectedPieces(
 
   let ox = offsetX;
   let oy = offsetY;
+  let maxIter = profile.hyenaStyleRepel ? 10 : 32;
 
-  for (let iter = 0; iter < 32; iter++) {
+  for (let iter = 0; iter < maxIter; iter++) {
     let moved = false;
 
     for (let g = 0; g < 4; g++) {
@@ -4432,66 +4763,68 @@ function platformLooseRepelFromConnectedPieces(
     }
   }
 
-  for (let j = 0; j < cfg.totalPieces; j++) {
-    if (j === index || cfg.getPieceGroup(j) === pieceGroup) {
-      continue;
+  if (!profile.hyenaStyleRepel) {
+    for (let j = 0; j < cfg.totalPieces; j++) {
+      if (j === index || cfg.getPieceGroup(j) === pieceGroup) {
+        continue;
+      }
+
+      let connectedGroup = cfg.getPieceGroup(j);
+
+      if (
+        platformLooseAssemblerRepelWeight(platformLooseGetRepelGroupT(p, connectedGroup)) <=
+        0
+      ) {
+        continue;
+      }
+
+      let repelOff = platformLooseGetConnectedPieceRepelOffset(p, j);
+
+      if (!repelOff) {
+        continue;
+      }
+
+      let gap = platformLooseRepelGap(
+        profile,
+        repelStrength,
+        platformLooseGetRepelGroupT(p, connectedGroup),
+        cfg,
+        pieceGroup,
+        connectedGroup
+      );
+      let connectedBox = platformLoosePieceScreenBBox(
+        cfg,
+        repelOff.x,
+        repelOff.y,
+        j,
+        repelOff.rot,
+        false
+      );
+      let asmPad = ms(8);
+      connectedBox = {
+        left: connectedBox.left - asmPad,
+        right: connectedBox.right + asmPad,
+        top: connectedBox.top - asmPad,
+        bottom: connectedBox.bottom + asmPad
+      };
+      let looseBox = platformLoosePieceScreenBBox(cfg, ox, oy, index, rot, true);
+      let sep = platformLooseSeparateBBox(looseBox, connectedBox, gap);
+
+      if (sep.dx === 0 && sep.dy === 0) {
+        continue;
+      }
+
+      let shifted = platformLooseApplyScreenSepToMesh(
+        cfg,
+        pivot,
+        ox,
+        oy,
+        sep.dx,
+        sep.dy
+      );
+      ox = shifted.x;
+      oy = shifted.y;
     }
-
-    let connectedGroup = cfg.getPieceGroup(j);
-
-    if (
-      platformLooseAssemblerRepelWeight(platformLooseGetRepelGroupT(p, connectedGroup)) <=
-      0
-    ) {
-      continue;
-    }
-
-    let repelOff = platformLooseGetConnectedPieceRepelOffset(p, j);
-
-    if (!repelOff) {
-      continue;
-    }
-
-    let gap = platformLooseRepelGap(
-      profile,
-      repelStrength,
-      platformLooseGetRepelGroupT(p, connectedGroup),
-      cfg,
-      pieceGroup,
-      connectedGroup
-    );
-    let connectedBox = platformLoosePieceScreenBBox(
-      cfg,
-      repelOff.x,
-      repelOff.y,
-      j,
-      repelOff.rot,
-      false
-    );
-    let asmPad = ms(8);
-    connectedBox = {
-      left: connectedBox.left - asmPad,
-      right: connectedBox.right + asmPad,
-      top: connectedBox.top - asmPad,
-      bottom: connectedBox.bottom + asmPad
-    };
-    let looseBox = platformLoosePieceScreenBBox(cfg, ox, oy, index, rot, true);
-    let sep = platformLooseSeparateBBox(looseBox, connectedBox, gap);
-
-    if (sep.dx === 0 && sep.dy === 0) {
-      continue;
-    }
-
-    let shifted = platformLooseApplyScreenSepToMesh(
-      cfg,
-      pivot,
-      ox,
-      oy,
-      sep.dx,
-      sep.dy
-    );
-    ox = shifted.x;
-    oy = shifted.y;
   }
 
   return { x: ox, y: oy };
@@ -5004,30 +5337,26 @@ function platformGetLooseWobbleDampen(p, pieceGroup, absX, absY, pieceT, index =
     let gap = profile.assembleClearance + profile.floatAmp * 0.65;
     let screen = platformLooseMeshPointToScreen(absX, absY, cfg);
 
-    for (let j = 0; j < cfg.totalPieces; j++) {
-      if (cfg.getPieceGroup(j) === pieceGroup) {
+    for (let g = 0; g < 4; g++) {
+      if (g === pieceGroup) {
         continue;
       }
 
-      let repelOff = platformLooseGetConnectedPieceRepelOffset(p, j);
-
-      if (!repelOff) {
+      if (platformLooseAssemblerRepelWeight(platformLooseGetRepelGroupT(p, g)) <= 0) {
         continue;
       }
 
-      let pieceBox = platformLoosePieceScreenBBox(
-        cfg,
-        repelOff.x,
-        repelOff.y,
-        j,
-        repelOff.rot,
-        true
-      );
+      let groupBox = platformLooseGetConnectedGroupUnionBBox(p, g);
+
+      if (!groupBox) {
+        continue;
+      }
+
       let inflated = {
-        left: pieceBox.left - gap,
-        right: pieceBox.right + gap,
-        top: pieceBox.top - gap,
-        bottom: pieceBox.bottom + gap
+        left: groupBox.left - gap,
+        right: groupBox.right + gap,
+        top: groupBox.top - gap,
+        bottom: groupBox.bottom + gap
       };
       let d = platformLoosePointBBoxDistance(screen.x, screen.y, inflated);
 
@@ -5207,8 +5536,15 @@ function platformApplyLoosePieceTransform(p, index, t) {
   }
 
   let assembleT = platformEaseInOutSine(t);
+  let homeY = 0;
+  if (cfg.id === "eagle" && profile.assembledHomeNudgeY) {
+    let dt = platformLooseGetDrawTransform(cfg);
+    homeY =
+      platformScreenPxToAnimalRefY(profile.assembledHomeNudgeY) /
+      max(abs(dt.scaleY), 0.001);
+  }
   let currentX = lerp(spaceX, 0, assembleT);
-  let currentY = lerp(spaceY, 0, assembleT);
+  let currentY = lerp(spaceY, homeY, assembleT);
   let currentRot = lerp(spaceRot, 0, assembleT);
   let pulseScale = platformGetLoosePositivePulseScale(p, t);
   let assembleLiftY = 0;
@@ -5221,9 +5557,14 @@ function platformApplyLoosePieceTransform(p, index, t) {
       max(abs(dt.scaleY), 0.001);
   }
 
-  translate(pivot.x + currentX, pivot.y + currentY - assembleLiftY);
+  let pieceFall = wrongFallGetPieceDrawOffset(p, index, cfg);
+
+  translate(
+    pivot.x + currentX + pieceFall.x,
+    pivot.y + currentY - assembleLiftY + pieceFall.y
+  );
   scale(pulseScale);
-  rotate(currentRot);
+  rotate(currentRot + pieceFall.rot);
   translate(-pivot.x, -pivot.y);
 }
 
@@ -5644,43 +5985,61 @@ function platformDrawQuestionProgress(p) {
 
   let dotR = POSTER_LAYOUT.progressDotR;
   let dotD = dotR * 2;
-  let dashW = POSTER_LAYOUT.progressDashW;
-  let dashH = dotD;
-  let gap = POSTER_LAYOUT.progressItemGap;
-  let y = platformGetProgressBaseY();
-  let markerY = y + dotD / 2;
-  let baseColor = color(cfg.textColor);
+  let stepGap = POSTER_LAYOUT.progressStepGap;
+  let y = platformGetProgressBaseY() + dotR;
+  let brown = color(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 255);
+  let brownMuted = color(
+    PLATFORM_TEXT_RGB[0],
+    PLATFORM_TEXT_RGB[1],
+    PLATFORM_TEXT_RGB[2],
+    POSTER_LAYOUT.progressUpcomingAlpha
+  );
+  let lineMuted = color(
+    PLATFORM_TEXT_RGB[0],
+    PLATFORM_TEXT_RGB[1],
+    PLATFORM_TEXT_RGB[2],
+    POSTER_LAYOUT.progressLineInactiveAlpha
+  );
+  // clickCount 0 → Q1 (dot 0 outlined), 1 → Q2, 2 → Q3
   let currentIndex = constrain(p.clickCount, 0, total - 1);
-
-  let sizes = [];
-  for (let i = 0; i < total; i++) {
-    sizes.push(i === currentIndex ? dashW : dotD);
-  }
-
-  let trackW = sizes.reduce((sum, size) => sum + size, 0) + gap * max(0, total - 1);
-  let cursorX = platformW / 2 - trackW / 2;
+  let startX = platformW / 2 - (stepGap * (total - 1)) / 2;
 
   push();
-  noStroke();
-  rectMode(CENTER);
+  drawingContext.globalAlpha = 1;
+  strokeCap(ROUND);
   ellipseMode(CENTER);
 
-  for (let i = 0; i < total; i++) {
-    let cx = cursorX + sizes[i] / 2;
+  for (let i = 0; i < total - 1; i++) {
+    let x1 = startX + i * stepGap + dotR;
+    let x2 = startX + (i + 1) * stepGap - dotR;
 
-    if (i === currentIndex) {
-      let dashColor = color(baseColor);
-      dashColor.setAlpha(255);
-      fill(dashColor);
-      rect(cx, markerY, dashW, dashH, dashH / 2);
+    if (i < currentIndex) {
+      stroke(brown);
+      strokeWeight(POSTER_LAYOUT.progressLineWeightActive);
     } else {
-      let dotColor = color(baseColor);
-      dotColor.setAlpha(POSTER_LAYOUT.progressDotAlpha);
-      fill(dotColor);
-      ellipse(cx, markerY, dotD, dotD);
+      stroke(lineMuted);
+      strokeWeight(POSTER_LAYOUT.progressLineWeightInactive);
     }
+    line(x1, y, x2, y);
+  }
 
-    cursorX += sizes[i] + gap;
+  for (let i = 0; i < total; i++) {
+    let cx = startX + i * stepGap;
+
+    if (i < currentIndex) {
+      noStroke();
+      fill(brown);
+      ellipse(cx, y, dotD, dotD);
+    } else if (i === currentIndex) {
+      noFill();
+      stroke(brown);
+      strokeWeight(POSTER_LAYOUT.progressDotStrokeWeight);
+      ellipse(cx, y, dotD, dotD);
+    } else {
+      noStroke();
+      fill(brownMuted);
+      ellipse(cx, y, dotD, dotD);
+    }
   }
 
   pop();
@@ -5824,15 +6183,19 @@ const POSTER_LAYOUT = {
   headerTextY: my(34) + ms(5) + 20,
   headerNudgeY: -30,
   headerLineNudgeY: ms(2),
-  backButtonSize: ms(44),
-  backButtonGlyphSize: ms(36),
+  headerRowNudgeY: ms(20),
+  backButtonSize: ms(63),
+  backButtonGlyphSize: ms(63),
   backButtonLabelGap: ms(8),
   backButtonStrokeWeight: ms(1.4),
   headerBackNudgeX: ms(-14),
-  headerNameNudgeX: ms(-5),
-  finalFooterNudgeY: ms(-35),
+  headerNameNudgeX: ms(-12),
+  headerNameNudgeY: ms(-8),
+  finalFooterNudgeY: ms(-85),
   headerBackNudgeY: ms(-2),
+  headerNameSize: ms(20),
   finalMessageNudgeY: -60,
+  finalPosterNudgeY: ms(90),
   feedbackNudgeY: -25,
   choiceW: ms(168),
   choiceH: ms(168),
@@ -5856,11 +6219,20 @@ const POSTER_LAYOUT = {
   finalCtaH: ms(56),
   frameStrokeWeight: 0.9,
   questionPhaseNudgeY: -10,
-  progressGapBelowQuestion: ms(12),
-  progressDashW: ms(10),
-  progressDotR: ms(3),
-  progressItemGap: ms(12),
-  progressDotAlpha: 72
+  progressGapBelowQuestion: ms(16),
+  progressDotR: ms(9),
+  progressDotStrokeWeight: ms(2.8),
+  progressStepGap: ms(66),
+  progressLineWeightActive: ms(2.8),
+  progressLineWeightInactive: ms(1.4),
+  progressUpcomingAlpha: 44,
+  progressLineInactiveAlpha: 50,
+  looseDefaultTop: my(120),
+  looseDefaultBottom: my(720),
+  choiceKeepOutTop: my(670),
+  eagleScatterTop: my(208),
+  eagleHeaderFloorInit: my(128),
+  eagleHeaderFloorAdjust: my(200)
 };
 
 function platformGetFinalBodyTopY() {
@@ -5895,7 +6267,15 @@ function posterCreateState(id, cfg) {
     touchDevice: false,
     finalMotion: 0,
     deer: { x: 30, y: -80, scale: 0.92, drawX: 30, drawY: -80 },
-    hyena: { x: 26, y: -8, scale: 0.6, drawX: 26, drawY: -8 }
+    hyena: { x: 26, y: -8, scale: 0.6, drawX: 26, drawY: -8 },
+    wrongFallT: 0,
+    wrongFallActive: false,
+    wrongWaitT: 0,
+    wrongWaitActive: false,
+    wrongRiseT: 0,
+    wrongRiseActive: false,
+    wrongFallEls: null,
+    wrongFallPieces: null
   };
 }
 
@@ -6167,6 +6547,7 @@ const posterRegistry = {
       zonePushBlend: 1,
       assembleClearance: ms(14),
       assembledScreenLift: 35,
+      assembledHomeNudgeY: ms(40),
       looseRepelFollow: 0.22,
       choiceKeepOut: {
         left: mx(24),
@@ -6606,6 +6987,14 @@ function posterReset(p) {
   p.finalMotion = 0;
   p.deer = { x: 30, y: -80, scale: 0.92, drawX: 30, drawY: -80 };
   p.hyena = { x: 26, y: -8, scale: 0.6, drawX: 26, drawY: -8 };
+  p.wrongFallT = 0;
+  p.wrongFallActive = false;
+  p.wrongWaitT = 0;
+  p.wrongWaitActive = false;
+  p.wrongRiseT = 0;
+  p.wrongRiseActive = false;
+  p.wrongFallEls = null;
+  p.wrongFallPieces = null;
 }
 
 function posterResetAll() {
@@ -6727,12 +7116,21 @@ function platformHandlePosterBackPress() {
 }
 
 function posterGetHeaderLineY() {
-  return POSTER_LAYOUT.headerLineY + POSTER_LAYOUT.headerNudgeY + POSTER_LAYOUT.headerLineNudgeY;
+  return (
+    POSTER_LAYOUT.headerLineY +
+    POSTER_LAYOUT.headerNudgeY +
+    POSTER_LAYOUT.headerLineNudgeY +
+    POSTER_LAYOUT.headerRowNudgeY
+  );
 }
 
 function posterGetHeaderLayout() {
-  let nameY = POSTER_LAYOUT.headerTextY + POSTER_LAYOUT.headerNudgeY;
-  let nameSize = ms(17);
+  let nameY =
+    POSTER_LAYOUT.headerTextY +
+    POSTER_LAYOUT.headerNudgeY +
+    POSTER_LAYOUT.headerNameNudgeY +
+    POSTER_LAYOUT.headerRowNudgeY;
+  let nameSize = POSTER_LAYOUT.headerNameSize;
   let backSize = POSTER_LAYOUT.backButtonSize;
   let contentX = POSTER_LAYOUT.headerTextX + POSTER_LAYOUT.headerBackNudgeX;
   let backBox = {
@@ -6774,7 +7172,7 @@ function posterDrawBackButton(p, box, textColor) {
   let cx = box.x + box.w * 0.5;
   let cy = box.y + box.h / 2;
   let armLen = glyph * 0.18;
-  let spreadY = glyph * 0.24;
+  let spreadY = glyph * 0.17;
   let tipX = cx - armLen;
 
   line(cx, cy - spreadY, tipX, cy);
@@ -6821,17 +7219,42 @@ function posterDrawQuestionUI(p) {
     return;
   }
 
+  // Question title — its own fall
+  let fQ = wrongFallGetElemTransform(p, "question");
+  push();
+  translate(fQ.x, fQ.y);
+  rotate(fQ.rot);
   platformDrawQuestionTitle(cfg.textColor);
+  pop();
+
+  // Progress bar — its own fall
+  let fProg = wrongFallGetElemTransform(p, "progress");
+  push();
+  translate(fProg.x, fProg.y);
   platformDrawQuestionProgress(p);
-  platformDrawStageChoices(
-    p.clickCount,
-    p.leftBox,
-    p.rightBox,
-    p.images,
-    (x, y, w, h, img, label, imgId, choice) =>
-      posterDrawChoicePanel(p, x, y, w, h, img, label, imgId, choice),
-    cfg.choiceStages || platformChoiceStages
-  );
+  pop();
+
+  // Choices — left and right each fall independently
+  let stages = cfg.choiceStages || platformChoiceStages;
+  if (p.clickCount < stages.length) {
+    let stage = stages[p.clickCount];
+
+    let fL = wrongFallGetElemTransform(p, "choiceL");
+    push();
+    translate(fL.x, fL.y);
+    rotate(fL.rot);
+    posterDrawChoicePanel(p, p.leftBox.x, p.leftBox.y, p.leftBox.w, p.leftBox.h,
+      p.images[stage.left.img], stage.left.label, stage.left.img, stage.left);
+    pop();
+
+    let fR = wrongFallGetElemTransform(p, "choiceR");
+    push();
+    translate(fR.x, fR.y);
+    rotate(fR.rot);
+    posterDrawChoicePanel(p, p.rightBox.x, p.rightBox.y, p.rightBox.w, p.rightBox.h,
+      p.images[stage.right.img], stage.right.label, stage.right.img, stage.right);
+    pop();
+  }
 }
 
 function posterDrawChoicePanel(p, x, y, w, h, img, label, imgId, choice = {}) {
@@ -6873,7 +7296,11 @@ function posterDrawFinalMessage(p, alphaOverride = null) {
   textLeading(bodyLeading);
   let bodyLineCount = cfg.finalBody.text.split("\n").length;
   let bodyBlockH = (bodyLineCount - 1) * bodyLeading + bodySize;
-  let bodyY = platformGetFinalBodyTopY() + POSTER_LAYOUT.finalContentYOffset + POSTER_LAYOUT.finalMessageNudgeY;
+  let bodyY =
+    platformGetFinalBodyTopY() +
+    POSTER_LAYOUT.finalContentYOffset +
+    POSTER_LAYOUT.finalMessageNudgeY +
+    POSTER_LAYOUT.finalPosterNudgeY;
   let bodyX =
     POSTER_LAYOUT.finalBodyX +
     POSTER_LAYOUT.finalBodyXOffset +
@@ -6952,9 +7379,57 @@ function posterDrawFooter(p) {
   );
 }
 
+function wrongFallTotalFrames(p) {
+  let max = 0;
+  if (p.wrongFallEls) {
+    for (let k in p.wrongFallEls) {
+      let el = p.wrongFallEls[k];
+      max = Math.max(max, el.delayF + el.fallF);
+    }
+  }
+  if (p.wrongFallPieces) {
+    for (let el of p.wrongFallPieces) {
+      max = Math.max(max, el.delayF + el.fallF);
+    }
+  }
+  return max + 6;
+}
+
+function posterTickWrongAnimation(p) {
+  if (p.wrongFallActive) {
+    p.wrongFallT++;
+    let total = wrongFallTotalFrames(p);
+    if (p.wrongFallT >= total) {
+      p.wrongFallActive = false;
+      p.wrongFallT = total; // keep at max so elements stay off-screen during wait
+      posterRestartFromWrongAnswer(p);
+      p.wrongWaitActive = true;
+      p.wrongWaitT = 0;
+    }
+  }
+  if (p.wrongWaitActive) {
+    p.wrongWaitT++;
+    if (p.wrongWaitT >= WRONG_WAIT_FRAMES) {
+      p.wrongWaitActive = false;
+      p.wrongWaitT = 0;
+      p.wrongRiseActive = true;
+      p.wrongRiseT = 0;
+    }
+  }
+  if (p.wrongRiseActive) {
+    p.wrongRiseT++;
+    if (p.wrongRiseT >= WRONG_RISE_FRAMES) {
+      p.wrongRiseActive = false;
+      p.wrongRiseT = 0;
+    }
+  }
+}
+
 function posterDraw(id) {
   let p = posterRegistry[id];
   let cfg = p.cfg;
+  posterTickWrongAnimation(p);
+  platformLooseBeginRepelFrame(p);
   platformLooseTickRepelBlend(p);
   platformTickPosterDisassemble(p);
   platformDecayDisassembleRepelState(p);
@@ -6975,6 +7450,7 @@ function posterDraw(id) {
 function posterHandleChoicePress(id) {
   let p = posterRegistry[id];
   let cfg = p.cfg;
+  if (p.wrongFallActive || p.wrongWaitActive || p.wrongRiseActive) return;
   if (p.clickCount >= cfg.finalClickCount) return;
 
   let clickedLeft = platformWasBoxClicked(p.leftBox);
@@ -7011,8 +7487,15 @@ function posterHandleChoicePress(id) {
     }
     platformTriggerCorrectFeedback(id);
   } else if (clickedWrong) {
-    posterRestartFromWrongAnswer(p);
-    platformTriggerWrongFeedback(id, correctSide === "left" ? "right" : "left");
+    if (!p.wrongFallActive && !p.wrongWaitActive && !p.wrongRiseActive) {
+      p.wrongFallActive = true;
+      p.wrongFallT = 0;
+      p.wrongWaitActive = false;
+      p.wrongRiseActive = false;
+      p.wrongFallEls = wrongFallBuildUIElements();
+      p.wrongFallPieces = wrongFallBuildPieces(p.cfg.totalPieces || 15);
+      platformVibrateWrongAnswer();
+    }
   }
 }
 
@@ -8552,10 +9035,11 @@ function applyHyenaPieceTransform(p, index, t, cx, cy) {
   let currentY = lerp(scatteredY, 0, t);
   let currentRot = lerp(scatteredRot, 0, t);
   let pulseScale = platformGetLoosePositivePulseScale(p, t);
+  let pieceFall = wrongFallGetPieceDrawOffset(p, index, p.cfg);
 
-  translate(cx + currentX, cy + currentY);
+  translate(cx + currentX + pieceFall.x, cy + currentY + pieceFall.y);
   scale(pulseScale);
-  rotate(currentRot);
+  rotate(currentRot + pieceFall.rot);
   translate(-cx, -cy);
 }
 
