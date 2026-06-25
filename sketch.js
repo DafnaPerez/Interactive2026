@@ -20,6 +20,7 @@ let platformPosterFadeColor = null;
 let platformShareOpen = false;
 let platformShareOpenTime = 0;
 let platformShareCopiedUntil = 0;
+let platformShareCopiedMessage = "";
 let platformShareBoxes = null;
 let platformSharePreviewImage = null;
 let platformSharePreviewCapturePending = false;
@@ -29,6 +30,13 @@ const PLATFORM_SHARE_FADE_MS = 260;
 let platformShareWhatsappLogo = null;
 let platformShareInstagramLogo = null;
 let platformShareFacebookLogo = null;
+let platformFinalHomeIcon = null;
+let platformFinalShareIcon = null;
+let platformFinalMenuIcon = null;
+let platformAnimalMenuOpen = false;
+let platformAnimalMenuOpenTime = 0;
+let platformAnimalMenuBoxes = null;
+const PLATFORM_ANIMAL_MENU_FADE_MS = 260;
 let platformLineArtRecolorCache = new WeakMap();
 
 function platformShareAnimFrame() {
@@ -39,7 +47,7 @@ let platformLoadingTargetAnimal = null;
 let platformLoadingStartTime = null;
 const PLATFORM_LOADING_HOLD_MS = 450;
 const PLATFORM_LOADING_MORPH_MS = 280;
-const PLATFORM_LOADING_TOTAL_MS = 7000;
+const PLATFORM_LOADING_TOTAL_MS = 5000;
 
 // Original poster art/layout reference (650×975)
 const REF_W = 650;
@@ -152,6 +160,16 @@ const PLATFORM_TITLE_Y = my(110) + 20;
 const PLATFORM_BG_COLOR = "#F4EBDD";
 const PLATFORM_TEXT_COLOR = "#4E4138";
 const PLATFORM_TEXT_RGB = [78, 65, 56];
+const PLATFORM_UI_ICON_V = 5;
+const PLATFORM_SHARE_PUBLIC_URL = "https://dafnaperez.github.io/Interactive2026/";
+
+const PLATFORM_SHARE_ANIMAL_PHRASE = {
+  turtle: "sea turtles",
+  eagle: "griffon vultures",
+  deer: "gazelles",
+  toad: "toads",
+  hyena: "hyenas"
+};
 
 const ANIMAL_REF_W = REF_W;
 const ANIMAL_ANCHOR_Y = 400;
@@ -486,6 +504,7 @@ const platformText = {
     instagram: "Instagram",
     facebook: "Facebook",
     copied: "Link copied — paste in Instagram",
+    copiedOpeningInstagram: "Copied — opening Instagram…",
     close: "Not now",
     back: "try another animal >>"
   }
@@ -525,6 +544,9 @@ function preload() {
   platformShareWhatsappLogo = loadImage("whatsapp_logo.png");
   platformShareInstagramLogo = loadImage("instagram_logo.png");
   platformShareFacebookLogo = loadImage("facebook_logo.png");
+  platformFinalHomeIcon = loadImage(`home.png?v=${PLATFORM_UI_ICON_V}`);
+  platformFinalShareIcon = loadImage(`share.png?v=${PLATFORM_UI_ICON_V}`);
+  platformFinalMenuIcon = loadImage(`menu.png?v=${PLATFORM_UI_ICON_V}`);
 }
 
 function platformApplyCanvasSize() {
@@ -584,6 +606,9 @@ function draw() {
   if (platformShareOpen) {
     platformDrawShareOverlay();
   }
+  if (platformAnimalMenuOpen) {
+    platformDrawAnimalMenuOverlay();
+  }
 }
 
 function mousePressed() {
@@ -601,12 +626,17 @@ function mousePressed() {
     return;
   }
 
+  if (platformAnimalMenuOpen) {
+    platformHandleAnimalMenuPress();
+    return;
+  }
+
   if (platformHandlePosterBackPress()) {
     return;
   }
 
   if (platformIsCurrentPosterFinal()) {
-    platformHandleFinalCtaPress();
+    platformHandleFinalActionPress();
     return;
   }
 
@@ -628,12 +658,17 @@ function touchStarted() {
     return false;
   }
 
+  if (platformAnimalMenuOpen) {
+    platformHandleAnimalMenuPress();
+    return false;
+  }
+
   if (platformHandlePosterBackPress()) {
     return false;
   }
 
   if (platformIsCurrentPosterFinal()) {
-    platformHandleFinalCtaPress();
+    platformHandleFinalActionPress();
     return false;
   }
 
@@ -650,6 +685,10 @@ function windowResized() {
 
 function keyPressed() {
   if (keyCode === ESCAPE) {
+    if (platformAnimalMenuOpen) {
+      platformCloseAnimalMenu();
+      return;
+    }
     if (platformShareOpen) {
       platformCloseShare();
       return;
@@ -666,7 +705,7 @@ function platformGetFinalBodyLeading(cfg) {
   return cfg?.finalBody?.leading ?? POSTER_LAYOUT.finalBodyLeading;
 }
 
-function platformGetFinalCtaLayout(p) {
+function platformGetFinalContentBottom(p) {
   let cfg = p.cfg;
   let bodySize = ms(20);
   let bodyLeading = platformGetFinalBodyLeading(cfg);
@@ -684,20 +723,56 @@ function platformGetFinalCtaLayout(p) {
     (titleLineCount - 1) * platformText.finalTitle.leading + platformText.finalTitle.size;
   let titleY =
     bodyY + (referenceBodyBlockH - titleBlockH) / 2 + POSTER_LAYOUT.finalTitleYOffset;
-  let contentBottom = max(titleY + titleBlockH, bodyY + actualBodyBlockH);
-  let ctaW = platformW - POSTER_LAYOUT.marginX * 2;
+  return max(titleY + titleBlockH, bodyY + actualBodyBlockH);
+}
+
+function platformGetTripleIconCentersInBar(barX, barW, padX) {
+  let slotW = (barW - padX * 2) / 3;
+  return [
+    barX + padX + slotW * 0.5,
+    barX + padX + slotW * 1.5,
+    barX + padX + slotW * 2.5
+  ];
+}
+
+function platformGetFinalActionBarIconCenters() {
+  let barW = POSTER_LAYOUT.finalActionBarW;
+  let barX = (platformW - barW) / 2;
+  return platformGetTripleIconCentersInBar(
+    barX,
+    barW,
+    POSTER_LAYOUT.finalActionBarPadX
+  );
+}
+
+function platformGetFinalActionBarLayout(p) {
+  let barW = POSTER_LAYOUT.finalActionBarW;
+  let barH = POSTER_LAYOUT.finalActionBarH;
+  let barX = (platformW - barW) / 2;
+  let barY = platformGetFinalContentBottom(p) + POSTER_LAYOUT.finalCtaGap;
+  let padX = POSTER_LAYOUT.finalActionBarPadX;
+  let slotW = (barW - padX * 2) / 3;
 
   return {
-    x: POSTER_LAYOUT.marginX,
-    y: contentBottom + POSTER_LAYOUT.finalCtaGap,
-    w: ctaW,
-    h: POSTER_LAYOUT.finalCtaH
+    bar: { x: barX, y: barY, w: barW, h: barH },
+    home: { x: barX + padX, y: barY, w: slotW, h: barH },
+    share: { x: barX + padX + slotW, y: barY, w: slotW, h: barH },
+    menu: { x: barX + padX + slotW * 2, y: barY, w: slotW, h: barH }
   };
 }
 
 function platformRoundRectPath(ctx, x, y, w, h, radius) {
   let r = min(radius, w / 2, h / 2);
   ctx.beginPath();
+  if (r >= h / 2 - 0.01 && w > h) {
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.arc(x + w - r, y + r, r, -HALF_PI, HALF_PI);
+    ctx.lineTo(x + r, y + h);
+    ctx.arc(x + r, y + r, r, HALF_PI, -HALF_PI);
+    ctx.closePath();
+    return;
+  }
   ctx.moveTo(x + r, y);
   ctx.lineTo(x + w - r, y);
   ctx.quadraticCurveTo(x + w, y, x + w, y + r);
@@ -755,7 +830,7 @@ function platformDrawLiquidGlassButton(
   ctx.shadowBlur = ms(hover ? 14 : 10);
   ctx.shadowOffsetY = ms(hover ? 4 : 3);
   ctx.shadowOffsetX = 0;
-  platformRoundRectPath(ctx, x, y, rw, rh, cornerR);
+  platformRoundRectPath(ctx, x, y, rw, rh, min(cornerR, rw / 2, rh / 2));
   let rim = ctx.createLinearGradient(0, 0, w, h);
   rim.addColorStop(
     0,
@@ -770,62 +845,111 @@ function platformDrawLiquidGlassButton(
   ctx.restore();
 }
 
-function platformDrawFinalCta(p, alpha) {
-  let cfg = p.cfg;
-  let box = platformGetFinalCtaLayout(p);
-  p.finalCtaBox = box;
-
-  let hover =
-    !p.touchDevice &&
-    mouseX > box.x &&
-    mouseX < box.x + box.w &&
-    mouseY > box.y &&
-    mouseY < box.y + box.h;
-  let s = hover ? 1.02 : 1;
-  let cornerR = POSTER_LAYOUT.choiceCornerRadius;
-
-  push();
-  translate(box.x + box.w / 2, box.y + box.h / 2);
-  scale(s);
-  translate(-box.w / 2, -box.h / 2);
-
-  platformDrawLiquidGlassButton(
-    box.w,
-    box.h,
-    cornerR,
-    cfg.choiceButtonColor,
-    alpha,
-    hover,
-    cfg.textColor
-  );
-
-  platformApplyGrungeFont(p.grungeFont);
-  let labelColor = color(cfg.textColor);
-  labelColor.setAlpha(alpha);
-  fill(labelColor);
-  textAlign(CENTER, CENTER);
-  textSize(platformText.finalCta.size);
-  text(platformText.finalCta.text, box.w / 2, box.h / 2);
-
-  pop();
-}
-
-function platformHandleFinalCtaPress() {
-  let p = posterRegistry[platformMode];
-  if (!p || !p.finalCtaBox) {
+function platformDrawFinalActionIcon(box, img, alpha, hover, iconNudgeY = 0, maxSize) {
+  if (!img || img.width <= 0) {
     return;
   }
 
-  if (platformWasBoxClicked(p.finalCtaBox)) {
+  let aspect = img.width / img.height;
+  let drawW = aspect >= 1 ? maxSize : maxSize * aspect;
+  let drawH = aspect >= 1 ? maxSize / aspect : maxSize;
+  let cx = box.x + box.w / 2;
+  let cy = box.y + box.h / 2 + iconNudgeY;
+
+  push();
+  translate(cx, cy);
+  scale(hover ? 1.05 : 1);
+  imageMode(CENTER);
+  tint(255, alpha);
+  drawingContext.imageSmoothingEnabled = true;
+  drawingContext.imageSmoothingQuality = "high";
+  image(img, 0, 0, drawW, drawH);
+  noTint();
+  pop();
+  imageMode(CORNER);
+}
+
+function platformDrawFinalActionBar(p, alpha) {
+  let cfg = p.cfg;
+  let layout = platformGetFinalActionBarLayout(p);
+  p.finalActionBoxes = layout;
+  let bar = layout.bar;
+  let iconMax = bar.h * POSTER_LAYOUT.finalActionIconScale;
+  let hoverKey = null;
+
+  for (let key of ["home", "share", "menu"]) {
+    let box = layout[key];
+    if (
+      !p.touchDevice &&
+      mouseX > box.x &&
+      mouseX < box.x + box.w &&
+      mouseY > box.y &&
+      mouseY < box.y + box.h
+    ) {
+      hoverKey = key;
+    }
+  }
+
+  push();
+  translate(bar.x, bar.y);
+  platformDrawLiquidGlassButton(
+    bar.w,
+    bar.h,
+    bar.h / 2,
+    cfg.choiceButtonColor,
+    alpha,
+    hoverKey !== null,
+    cfg.textColor
+  );
+  pop();
+
+  for (let key of ["home", "share", "menu"]) {
+    let box = layout[key];
+    let img =
+      key === "home"
+        ? platformFinalHomeIcon
+        : key === "share"
+          ? platformFinalShareIcon
+          : platformFinalMenuIcon;
+    let iconNudgeY = key === "home" ? 1 : key === "menu" ? 2 : 0;
+    platformDrawFinalActionIcon(
+      box,
+      img,
+      alpha,
+      hoverKey === key,
+      iconNudgeY,
+      iconMax
+    );
+  }
+}
+
+function platformHandleFinalActionPress() {
+  let p = posterRegistry[platformMode];
+  if (!p || !p.finalActionBoxes) {
+    return;
+  }
+
+  let boxes = p.finalActionBoxes;
+  if (platformWasBoxClicked(boxes.home)) {
+    platformReturnToIntro();
+    return;
+  }
+  if (platformWasBoxClicked(boxes.share)) {
     platformOpenShare();
+    return;
+  }
+  if (platformWasBoxClicked(boxes.menu)) {
+    platformOpenAnimalMenu();
   }
 }
 
 function platformOpenShare() {
+  platformCloseAnimalMenu();
   let p = posterRegistry[platformMode];
   platformShareOpen = true;
   platformShareOpenTime = millis();
   platformShareCopiedUntil = 0;
+  platformShareCopiedMessage = "";
   platformShareFrozenFrame = frameCount;
   platformSharePreviewImage = null;
   platformSharePreviewCapturePending = true;
@@ -835,47 +959,329 @@ function platformOpenShare() {
 function platformCloseShare() {
   platformShareOpen = false;
   platformShareCopiedUntil = 0;
+  platformShareCopiedMessage = "";
   platformShareBoxes = null;
   platformSharePreviewImage = null;
   platformSharePreviewCapturePending = false;
   platformSharePreviewStill = false;
 }
 
-function platformGetSharePageUrl() {
-  if (typeof window === "undefined" || !window.location) {
-    return "https://dafnaperez.github.io/Interactive2026/";
+function platformFormatAnimalMenuLabel(animalId) {
+  return animalId.charAt(0).toUpperCase() + animalId.slice(1);
+}
+
+function platformGetAnimalMenuEntries() {
+  let entries = [];
+  for (let i = 0; i < platformAnimals.length; i++) {
+    let animal = platformAnimals[i];
+    if (animal.id === platformMode || !posterRegistry[animal.id]) {
+      continue;
+    }
+    entries.push({
+      id: animal.id,
+      label: platformFormatAnimalMenuLabel(animal.id),
+      animal
+    });
+  }
+  return entries;
+}
+
+function platformGetAnimalMenuPopoverMotion() {
+  if (!platformAnimalMenuOpen) {
+    return { alpha: 0, offsetY: 0, scale: 1 };
+  }
+  let t = constrain(
+    (millis() - platformAnimalMenuOpenTime) / PLATFORM_ANIMAL_MENU_FADE_MS,
+    0,
+    1
+  );
+  let e = platformEaseOutCubic(t);
+  return {
+    alpha: e,
+    offsetY: lerp(ms(12), 0, e),
+    scale: lerp(0.94, 1, e)
+  };
+}
+
+function platformGetAnimalMenuOverlayAlpha() {
+  return platformGetAnimalMenuPopoverMotion().alpha * 255;
+}
+
+function platformDrawMenuAnimalTriangle(animal, centerX, centerY, size) {
+  let pts = animal.pts;
+  let cx0 = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
+  let cy0 = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
+  let maxR = 0;
+  for (let pt of pts) {
+    maxR = max(maxR, dist(pt[0], pt[1], cx0, cy0));
+  }
+  let s = maxR > 0 ? size / maxR : 1;
+
+  noStroke();
+  fill(animal.color);
+  triangle(
+    centerX + (pts[0][0] - cx0) * s,
+    centerY + (pts[0][1] - cy0) * s,
+    centerX + (pts[1][0] - cx0) * s,
+    centerY + (pts[1][1] - cy0) * s,
+    centerX + (pts[2][0] - cx0) * s,
+    centerY + (pts[2][1] - cy0) * s
+  );
+}
+
+function platformGetAnimalMenuLayout(p) {
+  let entries = platformGetAnimalMenuEntries();
+  let actionBar = platformGetFinalActionBarLayout(p);
+  let anchor = actionBar.menu;
+  let rowH = ms(64);
+  let pad = ms(12);
+  let cardW = ms(148);
+  let cardH = pad * 2 + entries.length * rowH;
+  let gapAbove = ms(8);
+  let cardX = anchor.x + anchor.w / 2 - cardW / 2;
+  let cardY = anchor.y - cardH - gapAbove;
+
+  cardX = constrain(cardX, ms(10), platformW - cardW - ms(10));
+  cardY = max(ms(12), cardY);
+
+  let rows = [];
+  for (let i = 0; i < entries.length; i++) {
+    rows.push({
+      id: entries[i].id,
+      label: entries[i].label,
+      animal: entries[i].animal,
+      x: cardX + pad,
+      y: cardY + pad + i * rowH,
+      w: cardW - pad * 2,
+      h: rowH
+    });
   }
 
+  return {
+    card: { x: cardX, y: cardY, w: cardW, h: cardH },
+    anchor,
+    pad,
+    rowH,
+    rows
+  };
+}
+
+function platformOpenAnimalMenu() {
+  platformCloseShare();
+  let p = posterRegistry[platformMode];
+  platformAnimalMenuOpen = true;
+  platformAnimalMenuOpenTime = millis();
+  platformAnimalMenuBoxes = p ? platformGetAnimalMenuLayout(p) : null;
+}
+
+function platformCloseAnimalMenu() {
+  platformAnimalMenuOpen = false;
+  platformAnimalMenuBoxes = null;
+}
+
+function platformSwitchToAnimal(animalId) {
+  if (!animalId || !posterRegistry[animalId] || animalId === platformMode) {
+    return;
+  }
+  platformCloseAnimalMenu();
+  platformCloseShare();
+  platformStartLoadingForAnimal(animalId);
+}
+
+function platformDrawAnimalMenuBackdrop(shadeAlpha) {
+  if (shadeAlpha <= 0) {
+    return;
+  }
+  let a = (shadeAlpha / 255) * 0.08;
+  noStroke();
+  fill(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], a * 255);
+  rect(0, 0, platformW, platformH);
+}
+
+function platformDrawAnimalMenuPopoverPointer(card, anchor, alpha) {
+  let tipX = constrain(
+    anchor.x + anchor.w / 2,
+    card.x + ms(18),
+    card.x + card.w - ms(18)
+  );
+  let tipY = card.y + card.h + ms(1);
+  let halfW = ms(7);
+  let h = ms(6);
+  fill(255, alpha);
+  noStroke();
+  triangle(tipX, tipY + h, tipX - halfW, tipY, tipX + halfW, tipY);
+  stroke(220, 210, 196, alpha * 0.9);
+  strokeWeight(1);
+  line(tipX - halfW, tipY, tipX + halfW, tipY);
+  noStroke();
+}
+
+function platformDrawAnimalMenuOverlay() {
+  let p = posterRegistry[platformMode];
+  if (!p) {
+    return;
+  }
+
+  let layout = platformGetAnimalMenuLayout(p);
+  platformAnimalMenuBoxes = layout;
+  let motion = platformGetAnimalMenuPopoverMotion();
+  let shadeAlpha = motion.alpha * 255;
+  let card = layout.card;
+  let anchor = layout.anchor;
+  let popoverCX = card.x + card.w / 2;
+  let popoverCY = card.y + card.h / 2 + motion.offsetY;
+
+  push();
+  platformDrawAnimalMenuBackdrop(shadeAlpha);
+
+  translate(popoverCX, popoverCY);
+  scale(motion.scale);
+  translate(-popoverCX, -popoverCY);
+
+  let drawCard = {
+    x: card.x,
+    y: card.y + motion.offsetY,
+    w: card.w,
+    h: card.h
+  };
+  platformDrawShareCardBackground(drawCard);
+  platformDrawAnimalMenuPopoverPointer(drawCard, anchor, shadeAlpha);
+
+  platformApplyGrungeFont(p.grungeFont);
+  let ink = color(PLATFORM_TEXT_COLOR);
+  let triSize = ms(12);
+  let textSizePx = ms(17);
+
+  textSize(textSizePx);
+  for (let i = 0; i < layout.rows.length; i++) {
+    let row = layout.rows[i];
+    let rowY = row.y + motion.offsetY;
+    let hover =
+      !p.touchDevice &&
+      mouseX > row.x &&
+      mouseX < row.x + row.w &&
+      mouseY > rowY &&
+      mouseY < rowY + row.h;
+    if (hover) {
+      fill(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 24);
+      rect(row.x, rowY + ms(5), row.w, row.h - ms(10), ms(8));
+    }
+
+    let triX = row.x + ms(14);
+    let triY = rowY + row.h / 2;
+    platformDrawMenuAnimalTriangle(row.animal, triX, triY, triSize);
+
+    ink.setAlpha(hover ? 220 : 255);
+    fill(ink);
+    textAlign(LEFT, CENTER);
+    text(row.label, row.x + ms(30) + POSTER_LAYOUT.animalMenuLabelNudgeX, rowY + row.h / 2);
+
+    if (i < layout.rows.length - 1) {
+      stroke(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 22);
+      strokeWeight(1);
+      line(row.x, rowY + row.h, row.x + row.w, rowY + row.h);
+      noStroke();
+    }
+  }
+  pop();
+}
+
+function platformHandleAnimalMenuPress() {
+  let p = posterRegistry[platformMode];
+  let boxes = platformAnimalMenuBoxes;
+  if (!boxes && p) {
+    boxes = platformGetAnimalMenuLayout(p);
+    platformAnimalMenuBoxes = boxes;
+  }
+  if (!boxes) {
+    return;
+  }
+
+  let motion = platformGetAnimalMenuPopoverMotion();
+  let card = {
+    x: boxes.card.x,
+    y: boxes.card.y + motion.offsetY,
+    w: boxes.card.w,
+    h: boxes.card.h
+  };
+
+  if (!platformWasBoxClicked(card)) {
+    platformCloseAnimalMenu();
+    return;
+  }
+
+  for (let i = 0; i < boxes.rows.length; i++) {
+    let row = boxes.rows[i];
+    let rowBox = {
+      x: row.x,
+      y: row.y + motion.offsetY,
+      w: row.w,
+      h: row.h
+    };
+    if (platformWasBoxClicked(rowBox)) {
+      platformSwitchToAnimal(row.id);
+      return;
+    }
+  }
+}
+
+function platformGetSharePageUrl() {
   try {
-    let url = new URL(window.location.href);
+    let url = new URL(PLATFORM_SHARE_PUBLIC_URL);
     if (posterRegistry[platformMode]) {
       url.searchParams.set("animal", platformMode);
     }
     return url.toString();
   } catch (err) {
-    return window.location.href;
+    return PLATFORM_SHARE_PUBLIC_URL;
   }
 }
 
+function platformGetShareAnimalPhrase(p) {
+  let animalId = p?.id || platformMode;
+  return PLATFORM_SHARE_ANIMAL_PHRASE[animalId] || "wildlife in Israel";
+}
+
 function platformGetShareMessage(p) {
-  let title = p?.cfg?.headerTitle || "wildlife in Israel";
+  let phrase = platformGetShareAnimalPhrase(p);
   return (
-    "Every choice counts. I explored how small daily choices can help protect " +
-    title +
-    "."
+    "I didn't realize my daily choices could affect " +
+    phrase +
+    ".\nTake the quiz and see yours 🌿✨"
   );
 }
 
 function platformGetSharePayload(p) {
   let message = platformGetShareMessage(p);
   let url = platformGetSharePageUrl();
-  return { message, url, text: message + " " + url };
+  return { message, url, text: message + "\n" + url };
 }
 
-function platformOpenExternalUrl(url) {
-  if (typeof window !== "undefined") {
-    window.open(url, "_blank", "noopener,noreferrer");
+function platformOpenExternalUrl(url, sameTab = false) {
+  if (typeof window === "undefined") {
+    return;
   }
+
+  try {
+    let link = document.createElement("a");
+    link.href = url;
+    if (!sameTab) {
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+    }
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } catch (err) {
+    window.location.href = url;
+  }
+}
+
+function platformIsTouchLikeDevice() {
+  return (
+    typeof window !== "undefined" &&
+    ("ontouchstart" in window || navigator.maxTouchPoints > 0)
+  );
 }
 
 function platformCopyShareText(text) {
@@ -906,25 +1312,68 @@ function platformCopyShareText(text) {
 }
 
 function platformShareViaWhatsApp(p) {
-  let payload = platformGetSharePayload(p);
-  platformOpenExternalUrl(
-    "https://api.whatsapp.com/send?text=" + encodeURIComponent(payload.text)
-  );
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  let text = platformGetSharePayload(p).text;
+  let encoded = encodeURIComponent(text);
+
+  if (platformIsTouchLikeDevice()) {
+    window.location.href = "whatsapp://send?text=" + encoded;
+    return;
+  }
+
+  platformOpenExternalUrl("https://api.whatsapp.com/send?text=" + encoded);
 }
 
-function platformShareViaFacebook(p) {
+function platformShowShareCopiedMessage(message, durationMs = 2400) {
+  platformShareCopiedMessage = message;
+  platformShareCopiedUntil = millis() + durationMs;
+}
+
+function platformShareViaNativeSheet(p, onFallback) {
   let payload = platformGetSharePayload(p);
-  platformOpenExternalUrl(
-    "https://www.facebook.com/sharer/sharer.php?u=" +
-      encodeURIComponent(payload.url) +
-      "&quote=" +
-      encodeURIComponent(payload.message)
-  );
+
+  if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+    navigator.share({ text: payload.text }).catch((err) => {
+      if (err.name === "AbortError") {
+        return;
+      }
+      onFallback(p, payload);
+    });
+    return;
+  }
+
+  onFallback(p, payload);
+}
+
+function platformShareInstagramFallback(p, payload) {
+  platformCopyShareText(payload.text);
+  platformShowShareCopiedMessage(platformText.share.copiedOpeningInstagram);
+
+  if (typeof window !== "undefined") {
+    window.location.href = "instagram://app";
+  }
 }
 
 function platformShareViaInstagram(p) {
-  platformCopyShareText(platformGetSharePayload(p).text);
-  platformShareCopiedUntil = millis() + 2200;
+  platformShareViaNativeSheet(p, platformShareInstagramFallback);
+}
+
+function platformShareFacebookFallback(p, payload) {
+  let encoded = encodeURIComponent(payload.url);
+
+  if (typeof window !== "undefined" && platformIsTouchLikeDevice()) {
+    window.location.href = "https://m.facebook.com/sharer.php?u=" + encoded;
+    return;
+  }
+
+  platformOpenExternalUrl("https://www.facebook.com/sharer/sharer.php?u=" + encoded);
+}
+
+function platformShareViaFacebook(p) {
+  platformShareViaNativeSheet(p, platformShareFacebookFallback);
 }
 
 function platformGetShareOverlayAlpha() {
@@ -946,7 +1395,7 @@ function platformGetShareOverlayLayout(p) {
   let cardY = (platformH - cardH) / 2 + PLATFORM_SHARE_OVERLAY_NUDGE_Y;
 
   let pad = ms(18);
-  let shareTouchSize = ms(44);
+  let shareTouchSize = POSTER_LAYOUT.shareIconTouchSize;
   let closeSize = PLATFORM_SHARE_CLOSE_SIZE;
   let titleSize = platformText.finalCta.size;
   let bodySize = ms(20);
@@ -985,11 +1434,7 @@ function platformGetShareOverlayLayout(p) {
   let iconsRowY = previewY + previewH + iconHit * 0.5 - 8 + ms(16);
   let iconsY = iconsRowY + PLATFORM_SHARE_ICONS_NUDGE_Y;
   let backY = iconsRowY + iconHit * 0.5 + ms(15) + PLATFORM_SHARE_BACK_NUDGE_Y;
-  let iconCenters = [
-    cardX + cardW * 0.38,
-    cardX + cardW * 0.5,
-    cardX + cardW * 0.62
-  ];
+  let iconCenters = platformGetFinalActionBarIconCenters();
 
   function iconBox(cx) {
     return {
@@ -1012,19 +1457,19 @@ function platformGetShareOverlayLayout(p) {
       ...iconBox(iconCenters[0]),
       accent: "#25D366",
       kind: "whatsapp",
-      iconR: ms(23)
+      iconR: POSTER_LAYOUT.shareIconR
     },
     instagram: {
       ...iconBox(iconCenters[1]),
       accent: "#C13584",
       kind: "instagram",
-      iconR: ms(20)
+      iconR: POSTER_LAYOUT.shareInstagramIconR
     },
     facebook: {
       ...iconBox(iconCenters[2]),
       accent: "#1877F2",
       kind: "facebook",
-      iconR: ms(23)
+      iconR: POSTER_LAYOUT.shareIconR
     },
     back: {
       x: cardX + pad,
@@ -1092,10 +1537,68 @@ function platformRecolorLineArtImage(img) {
   return out;
 }
 
+function platformThickenLineArtImage(img, radius = 1) {
+  if (!img || img.width <= 0 || radius <= 0) {
+    return img;
+  }
+
+  img.loadPixels();
+  let w = img.width;
+  let h = img.height;
+  let src = new Uint8ClampedArray(img.pixels);
+  let r2 = radius * radius;
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let bestA = 0;
+      let bestR = 0;
+      let bestG = 0;
+      let bestB = 0;
+
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          if (dx * dx + dy * dy > r2) {
+            continue;
+          }
+          let nx = x + dx;
+          let ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) {
+            continue;
+          }
+          let si = (ny * w + nx) * 4;
+          let a = src[si + 3];
+          if (a > bestA) {
+            bestA = a;
+            bestR = src[si];
+            bestG = src[si + 1];
+            bestB = src[si + 2];
+          }
+        }
+      }
+
+      let di = (y * w + x) * 4;
+      img.pixels[di] = bestR;
+      img.pixels[di + 1] = bestG;
+      img.pixels[di + 2] = bestB;
+      img.pixels[di + 3] = bestA;
+    }
+  }
+
+  img.updatePixels();
+  return img;
+}
+
+function platformProcessShareIcon(img) {
+  return platformThickenLineArtImage(
+    platformRecolorLineArtImage(img),
+    POSTER_LAYOUT.shareIconThicken
+  );
+}
+
 function platformProcessLineArtImages() {
-  platformShareWhatsappLogo = platformRecolorLineArtImage(platformShareWhatsappLogo);
-  platformShareInstagramLogo = platformRecolorLineArtImage(platformShareInstagramLogo);
-  platformShareFacebookLogo = platformRecolorLineArtImage(platformShareFacebookLogo);
+  platformShareWhatsappLogo = platformProcessShareIcon(platformShareWhatsappLogo);
+  platformShareInstagramLogo = platformProcessShareIcon(platformShareInstagramLogo);
+  platformShareFacebookLogo = platformProcessShareIcon(platformShareFacebookLogo);
 
   for (let id in posterRegistry) {
     let imgs = posterRegistry[id].images;
@@ -1129,6 +1632,10 @@ function platformDrawShareOptionButton(box, alpha, hover, iconR) {
   }
 
   let drawR = box.iconR ?? iconR;
+  let drawSize =
+    drawR * 2 +
+    POSTER_LAYOUT.shareIconSizeBonus +
+    (box.kind === "instagram" ? POSTER_LAYOUT.shareInstagramIconBonusPx : 0);
 
   push();
   let s = hover ? 1.04 : 1;
@@ -1140,7 +1647,7 @@ function platformDrawShareOptionButton(box, alpha, hover, iconR) {
   drawingContext.imageSmoothingQuality = "high";
   imageMode(CENTER);
   noTint();
-  image(img, 0, 0, drawR * 2, drawR * 2);
+  image(img, 0, 0, drawSize, drawSize);
   pop();
   imageMode(CORNER);
 }
@@ -1281,7 +1788,7 @@ function platformDrawShareOverlay() {
     fill(ink);
     textAlign(CENTER, TOP);
     textSize(ms(13));
-    text(platformText.share.copied, platformW / 2, layout.copiedY);
+    text(platformShareCopiedMessage || platformText.share.copied, platformW / 2, layout.copiedY);
   }
 
   let backHover =
@@ -1320,8 +1827,18 @@ function platformHandleSharePress() {
     platformShareBoxes = boxes;
   }
 
-  if (!platformWasBoxClicked(boxes.card)) {
-    platformCloseShare();
+  if (platformWasBoxClicked(boxes.whatsapp)) {
+    platformShareViaWhatsApp(p);
+    return;
+  }
+
+  if (platformWasBoxClicked(boxes.instagram)) {
+    platformShareViaInstagram(p);
+    return;
+  }
+
+  if (platformWasBoxClicked(boxes.facebook)) {
+    platformShareViaFacebook(p);
     return;
   }
 
@@ -1335,23 +1852,14 @@ function platformHandleSharePress() {
     return;
   }
 
-  if (platformWasBoxClicked(boxes.whatsapp)) {
-    platformShareViaWhatsApp(p);
-    return;
-  }
-
-  if (platformWasBoxClicked(boxes.instagram)) {
-    platformShareViaInstagram(p);
-    return;
-  }
-
-  if (platformWasBoxClicked(boxes.facebook)) {
-    platformShareViaFacebook(p);
+  if (!platformWasBoxClicked(boxes.card)) {
+    platformCloseShare();
   }
 }
 
 function platformReturnToIntro() {
   platformCloseShare();
+  platformCloseAnimalMenu();
   platformMode = "intro";
   platformSelectedStarted = false;
   platformIntroTransitionActive = false;
@@ -1407,24 +1915,68 @@ function platformGetAnimatedTrianglePoints(index) {
   ];
 }
 
+function platformAddSoftPoolGradient(ctx, cx, cy, maxR, rgb, peakAlpha) {
+  let [r, g, b] = rgb;
+  let rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
+  rg.addColorStop(0,    `rgba(${r},${g},${b},${peakAlpha})`);
+  rg.addColorStop(0.18, `rgba(${r},${g},${b},${peakAlpha * 0.72})`);
+  rg.addColorStop(0.40, `rgba(${r},${g},${b},${peakAlpha * 0.42})`);
+  rg.addColorStop(0.62, `rgba(${r},${g},${b},${peakAlpha * 0.20})`);
+  rg.addColorStop(0.82, `rgba(${r},${g},${b},${peakAlpha * 0.06})`);
+  rg.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+  return rg;
+}
+
+function platformDrawSoftPool(ctx, pl) {
+  let maxR = max(pl.rx, pl.ry);
+  ctx.save();
+  ctx.translate(pl.x, pl.y);
+  ctx.scale(pl.rx / maxR, pl.ry / maxR);
+  ctx.beginPath();
+  ctx.arc(0, 0, maxR, 0, Math.PI * 2);
+  ctx.fillStyle = platformAddSoftPoolGradient(ctx, 0, 0, maxR, pl.rgb, pl.alpha);
+  ctx.fill();
+  ctx.restore();
+}
+
 function platformDrawMainBackground() {
+  let ctx = drawingContext;
   noStroke();
   rectMode(CORNER);
-  ellipseMode(CENTER);
 
-  for (let y = 0; y < platformH; y++) {
-    let t = map(y, 0, platformH, 0, 1);
-    let c = lerpColor(color(PLATFORM_BG_COLOR), color("#E9DAC8"), t);
-    fill(c);
-    rect(0, y, platformW, 1);
-  }
+  // Clean warm-white base
+  let grad = ctx.createLinearGradient(0, 0, 0, platformH);
+  grad.addColorStop(0,   "#FAF6F0");
+  grad.addColorStop(0.5, "#F5EFE6");
+  grad.addColorStop(1,   "#EFE6D8");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, platformW, platformH);
 
-  let glowMaxR = mx(500);
-  for (let r = glowMaxR; r > 0; r -= mx(20)) {
-    let t = 1 - r / glowMaxR;
-    let a = pow(t, 1.35) * 14;
-    fill(251, 244, 234, a);
-    ellipse(platformW / 2, my(470), mx(r) * 1.03, my(r) * 0.8);
+  // Warm drifting pools — large radius, smooth multi-stop fade
+  let t = frameCount * 0.022;
+  let pools = [
+    {
+      x: platformW * (0.30 + sin(t * 0.50) * 0.36),
+      y: platformH * (0.15 + cos(t * 0.38) * 0.16),
+      rx: platformW * 1.05, ry: platformH * 0.62,
+      rgb: [228, 185, 155], alpha: 0.26
+    },
+    {
+      x: platformW * (0.75 + cos(t * 0.44) * 0.30),
+      y: platformH * (0.72 + sin(t * 0.36) * 0.20),
+      rx: platformW * 1.00, ry: platformH * 0.65,
+      rgb: [215, 172, 118], alpha: 0.22
+    },
+    {
+      x: platformW * (0.20 + sin(t * 0.42) * 0.28),
+      y: platformH * (0.55 + cos(t * 0.46) * 0.24),
+      rx: platformW * 0.95, ry: platformH * 0.58,
+      rgb: [200, 155, 130], alpha: 0.18
+    }
+  ];
+
+  for (let pl of pools) {
+    platformDrawSoftPool(ctx, pl);
   }
 }
 
@@ -6216,7 +6768,17 @@ const POSTER_LAYOUT = {
   finalBodyLeading: ms(24),
   finalBodyLineCount: 7,
   finalCtaGap: ms(26),
-  finalCtaH: ms(56),
+  finalActionBarW: ms(285),
+  finalActionBarH: ms(68),
+  finalActionBarPadX: ms(18),
+  finalActionIconScale: 0.58,
+  animalMenuLabelNudgeX: ms(6),
+  shareIconR: ms(26),
+  shareInstagramIconR: ms(24),
+  shareIconSizeBonus: ms(2),
+  shareInstagramIconBonusPx: 1,
+  shareIconThicken: 2,
+  shareIconTouchSize: ms(52),
   frameStrokeWeight: 0.9,
   questionPhaseNudgeY: -10,
   progressGapBelowQuestion: ms(16),
@@ -6262,7 +6824,7 @@ function posterCreateState(id, cfg) {
     leftBox: null,
     rightBox: null,
     finalStart: null,
-    finalCtaBox: null,
+    finalActionBoxes: null,
     jumpReadyTime: null,
     touchDevice: false,
     finalMotion: 0,
@@ -6982,7 +7544,7 @@ function posterReset(p) {
   p.disassembleBoost = 0;
   p.disassembleRepelWarmup = 0;
   p.finalStart = null;
-  p.finalCtaBox = null;
+  p.finalActionBoxes = null;
   p.jumpReadyTime = null;
   p.finalMotion = 0;
   p.deer = { x: 30, y: -80, scale: 0.92, drawX: 30, drawY: -80 };
@@ -7329,7 +7891,7 @@ function posterDrawFinalMessage(p, alphaOverride = null) {
   textLeading(bodyLeading);
   textAlign(LEFT, TOP);
   text(cfg.finalBody.text, bodyX, bodyY);
-  platformDrawFinalCta(p, alpha);
+  platformDrawFinalActionBar(p, alpha);
 }
 
 function posterDrawFeedback(p) {
