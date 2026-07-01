@@ -808,6 +808,124 @@ function platformDrawLiquidGlassButton(
   platformDrawFrostedGlass(bx, by, w, h, cornerR, accentColor, hover, alpha);
 }
 
+// Elevated 3D glass card — layered float shadows, a beveled body,
+// crisp specular gloss, and a light-catching rim. Bright, not grey.
+function platformDrawChoiceButton(bx, by, bw, bh, cornerR, hover = false, alpha = 255) {
+  let ctx = drawingContext;
+  let r = min(cornerR, bw / 2, bh / 2);
+  let a = alpha / 255;
+
+  // --- Soft ambient shadow (wide, warm, faint) ---
+  ctx.save();
+  platformRoundRectPath(ctx, bx, by, bw, bh, r);
+  ctx.shadowColor = `rgba(84, 66, 50, ${(hover ? 0.2 : 0.14) * a})`;
+  ctx.shadowBlur = ms(hover ? 40 : 30);
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = ms(hover ? 22 : 16);
+  ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+  ctx.fill();
+  ctx.restore();
+
+  // --- Tight contact shadow (crisp, close, sells the lift) ---
+  ctx.save();
+  platformRoundRectPath(ctx, bx, by, bw, bh, r);
+  ctx.shadowColor = `rgba(70, 54, 40, ${(hover ? 0.24 : 0.18) * a})`;
+  ctx.shadowBlur = ms(hover ? 10 : 7);
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = ms(hover ? 5 : 3);
+  ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  platformRoundRectPath(ctx, bx, by, bw, bh, r);
+  ctx.clip();
+
+  // --- Body: bright warm-white with a gentle domed fall-off ---
+  let body = ctx.createLinearGradient(bx, by, bx, by + bh);
+  body.addColorStop(0, `rgba(255, 255, 255, ${a})`);
+  body.addColorStop(0.5, `rgba(255, 253, 250, ${a})`);
+  body.addColorStop(1, `rgba(250, 245, 239, ${a})`);
+  ctx.fillStyle = body;
+  ctx.fillRect(bx, by, bw, bh);
+
+  // --- Big glossy sheen across the top half (the dome highlight) ---
+  let sheenH = bh * 0.6;
+  let sheen = ctx.createLinearGradient(bx, by, bx, by + sheenH);
+  sheen.addColorStop(0, `rgba(255, 255, 255, ${(hover ? 0.95 : 0.85) * a})`);
+  sheen.addColorStop(0.6, `rgba(255, 255, 255, ${0.28 * a})`);
+  sheen.addColorStop(1, `rgba(255, 255, 255, 0)`);
+  ctx.fillStyle = sheen;
+  ctx.fillRect(bx, by, bw, sheenH);
+
+  // --- Crisp specular gloss band near the top (wet-glass shine) ---
+  let glossTop = by + bh * 0.08;
+  let glossH = bh * 0.26;
+  let gloss = ctx.createLinearGradient(bx, glossTop, bx, glossTop + glossH);
+  gloss.addColorStop(0, `rgba(255, 255, 255, 0)`);
+  gloss.addColorStop(0.5, `rgba(255, 255, 255, ${(hover ? 0.9 : 0.78) * a})`);
+  gloss.addColorStop(1, `rgba(255, 255, 255, 0)`);
+  ctx.fillStyle = gloss;
+  // Inset the band slightly so it reads as a floating reflection.
+  ctx.fillRect(bx + bw * 0.06, glossTop, bw * 0.88, glossH);
+
+  // --- Soft lower reflection so the base still feels rounded ---
+  let reflH = bh * 0.32;
+  let refl = ctx.createLinearGradient(bx, by + bh - reflH, bx, by + bh);
+  refl.addColorStop(0, `rgba(255, 255, 255, 0)`);
+  refl.addColorStop(1, `rgba(255, 255, 255, ${0.45 * a})`);
+  ctx.fillStyle = refl;
+  ctx.fillRect(bx, by + bh - reflH, bw, reflH);
+
+  // --- Warm inner base shadow for thickness (kept light, not grey) ---
+  let baseH = bh * 0.22;
+  let base = ctx.createLinearGradient(bx, by + bh - baseH, bx, by + bh);
+  base.addColorStop(0, `rgba(150, 120, 96, 0)`);
+  base.addColorStop(1, `rgba(150, 120, 96, ${0.14 * a})`);
+  ctx.fillStyle = base;
+  ctx.fillRect(bx, by + bh - baseH, bw, baseH);
+  ctx.restore();
+
+  // --- Beveled top edge: bright inner highlight for a raised lip ---
+  ctx.save();
+  platformRoundRectPath(
+    ctx,
+    bx + ms(1.4),
+    by + ms(1.4),
+    bw - ms(2.8),
+    bh - ms(2.8),
+    max(1, r - ms(1.4))
+  );
+  let bevel = ctx.createLinearGradient(bx, by, bx, by + bh * 0.5);
+  bevel.addColorStop(0, `rgba(255, 255, 255, ${(hover ? 0.95 : 0.85) * a})`);
+  bevel.addColorStop(1, `rgba(255, 255, 255, 0)`);
+  ctx.strokeStyle = bevel;
+  ctx.lineWidth = ms(1.4);
+  ctx.lineJoin = "round";
+  ctx.stroke();
+  ctx.restore();
+
+  // --- Outer rim: bright top → faint warm base edge ---
+  ctx.save();
+  platformRoundRectPath(
+    ctx,
+    bx + 0.6,
+    by + 0.6,
+    bw - 1.2,
+    bh - 1.2,
+    max(1, r - 0.6)
+  );
+  let rim = ctx.createLinearGradient(bx, by, bx, by + bh);
+  rim.addColorStop(0, `rgba(255, 255, 255, ${a})`);
+  rim.addColorStop(0.45, `rgba(255, 255, 255, ${0.12 * a})`);
+  rim.addColorStop(1, `rgba(120, 98, 80, ${0.12 * a})`);
+  ctx.strokeStyle = rim;
+  ctx.lineWidth = ms(1);
+  ctx.lineJoin = "round";
+  ctx.stroke();
+  ctx.restore();
+}
+
 // Light glass slab — subtle fill and a crisp gradient rim.
 function platformDrawFrostedGlass(
   bx,
@@ -6563,16 +6681,13 @@ function platformDrawChoicePanel(config) {
   let glassBh = layout.btnH * s;
   let glassBx = glassCx - glassBw / 2;
   let glassBy = y + (layout.btnH - glassBh) / 2;
-  platformDrawFrostedGlass(
+  platformDrawChoiceButton(
     glassBx,
     glassBy,
     glassBw,
     glassBh,
     cornerR * s,
-    buttonColor,
-    hover,
-    255,
-    side === "left" ? -1 : 1
+    hover
   );
 
   push();
@@ -6582,12 +6697,16 @@ function platformDrawChoicePanel(config) {
 
   imageMode(CENTER);
   if (img) {
+    tint(255, 255, 255, 255);
     image(img, layout.imgX, layout.imgCenterY, layout.imgW, layout.imgH);
+    noTint();
   }
   if (overlayImg) {
     push();
+    tint(255, 255, 255, 255);
     blendMode(overlayBlendMode === "multiply" ? MULTIPLY : BLEND);
     image(overlayImg, layout.imgX, layout.imgCenterY, layout.imgW, layout.imgH);
+    noTint();
     pop();
   }
 
