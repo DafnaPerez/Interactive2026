@@ -4,6 +4,7 @@
 // =====================================================
 
 let platformMode = "intro"; // intro | turtle | eagle | deer | toad | hyena
+let platformMeshGrainGfx = null;
 let platformSelectedStarted = false;
 let platformIntroHover = -1;
 let platformCanvasReady = false;
@@ -158,6 +159,9 @@ function ms(s) {
 
 const PLATFORM_TITLE_Y = my(110) + 20;
 const PLATFORM_BG_COLOR = "#F4EBDD";
+// Mesh bg — clean blush wisp + warm caramel accent on pure white.
+const PLATFORM_MESH_WISP = [252, 236, 220];
+const PLATFORM_MESH_ACCENT = [210, 170, 128];
 const PLATFORM_TEXT_COLOR = "#4E4138";
 const PLATFORM_TEXT_RGB = [78, 65, 56];
 const PLATFORM_UI_ICON_V = 5;
@@ -181,6 +185,9 @@ const PLATFORM_SHARE_OVERLAY_NUDGE_Y = -ms(50);
 
 const WRONG_WAIT_FRAMES = 60; // 1 s pause
 const WRONG_RISE_FRAMES = 38;
+const PROGRESS_FILL_FRAMES = 26;
+const WRONG_TRY_AGAIN_FADE_OUT = 0.42;
+const WRONG_TRY_AGAIN_FALL_START = 0.58;
 const WRONG_OFFSCREEN_Y = platformH * 1.7;
 
 function wrongFallGetRiseScreenY(p) {
@@ -454,12 +461,11 @@ const platformText = {
   },
 
   loadingHint: {
-    text:
-      "In the next steps, you'll answer a few questions\nabout everyday decisions and how they can help\nprotect the environment.",
+    text: "Let's answer a few questions about everyday choices and their impact.",
     x: platformW / 2,
     y: my(560),
-    size: ms(20),
-    leading: ms(24),
+    size: ms(24),
+    leading: ms(28),
     wordGapScale: 0.72
   },
 
@@ -469,6 +475,10 @@ const platformText = {
     y: my(920),
     size: ms(24),
     leading: ms(28)
+  },
+
+  tryAgain: {
+    text: "Try again"
   },
 
   choiceLabel: {
@@ -786,60 +796,69 @@ function platformRoundRectPath(ctx, x, y, w, h, radius) {
 }
 
 function platformDrawLiquidGlassButton(
+  bx,
+  by,
   w,
   h,
   cornerR,
   accentColor,
   alpha = 255,
-  hover = false,
-  inkColor = null
+  hover = false
 ) {
-  let a = alpha / 255;
+  platformDrawFrostedGlass(bx, by, w, h, cornerR, accentColor, hover, alpha);
+}
+
+// Light glass slab — subtle fill and a crisp gradient rim.
+function platformDrawFrostedGlass(
+  bx,
+  by,
+  bw,
+  bh,
+  cornerR,
+  accentColor,
+  hover = false,
+  alpha = 255,
+  rimShift = 0
+) {
   let ctx = drawingContext;
-  let accent = color(accentColor || "#8A8A8A");
-  let ink = color(inkColor || accentColor || "#4A4A4A");
-  let ar = red(accent);
-  let ag = green(accent);
-  let ab = blue(accent);
-  let ir = red(ink);
-  let ig = green(ink);
-  let ib = blue(ink);
-  let strokeA = hover ? 0.68 : 0.48;
-  let x = 0.75;
-  let y = 0.75;
-  let rw = w - 1.5;
-  let rh = h - 1.5;
+  let r = min(cornerR, bw / 2, bh / 2);
+  let a = alpha / 255;
+  let [tr, tg, tb] = PLATFORM_TEXT_RGB;
+  let accent = color(accentColor || PLATFORM_TEXT_COLOR);
+  let sr = max(0, floor(lerp(tr, red(accent), 0.48)) - 14);
+  let sg = max(0, floor(lerp(tg, green(accent), 0.48)) - 14);
+  let sb = max(0, floor(lerp(tb, blue(accent), 0.48)) - 14);
+  let rimA = hover ? 0.82 : 0.7;
+  let shift = ms(14);
+  let tilt = bw * 0.22;
+  let rim =
+    rimShift < 0
+      ? ctx.createLinearGradient(bx - shift, by + bh, bx + tilt, by)
+      : rimShift > 0
+        ? ctx.createLinearGradient(bx + bw + shift, by + bh, bx + bw - tilt, by)
+        : ctx.createLinearGradient(bx, by, bx, by + bh);
 
   ctx.save();
-  platformRoundRectPath(ctx, 0, 0, w, h, cornerR);
-  let fillGrad = ctx.createLinearGradient(0, 0, 0, h);
-  fillGrad.addColorStop(
-    0,
-    `rgba(${hover ? 252 : 250}, ${hover ? 246 : 244}, ${hover ? 238 : 235}, ${0.25 * a})`
-  );
-  fillGrad.addColorStop(
-    1,
-    `rgba(${hover ? 248 : 246}, ${hover ? 242 : 240}, ${hover ? 234 : 231}, ${0.25 * a})`
-  );
-  ctx.fillStyle = fillGrad;
+  platformRoundRectPath(ctx, bx, by, bw, bh, r);
+  ctx.fillStyle = `rgba(255, 255, 255, ${(hover ? 0.55 : 0.42) * a})`;
   ctx.fill();
   ctx.restore();
 
   ctx.save();
-  ctx.shadowColor = `rgba(${ir}, ${ig}, ${ib}, ${(hover ? 0.14 : 0.09) * a})`;
-  ctx.shadowBlur = ms(hover ? 14 : 10);
-  ctx.shadowOffsetY = ms(hover ? 4 : 3);
-  ctx.shadowOffsetX = 0;
-  platformRoundRectPath(ctx, x, y, rw, rh, min(cornerR, rw / 2, rh / 2));
-  let rim = ctx.createLinearGradient(0, 0, w, h);
-  rim.addColorStop(
-    0,
-    `rgba(${min(255, ar + 10)}, ${min(255, ag + 10)}, ${min(255, ab + 10)}, ${strokeA * 0.68 * a})`
+  let inset = 0.5;
+  platformRoundRectPath(
+    ctx,
+    bx + inset,
+    by + inset,
+    bw - inset * 2,
+    bh - inset * 2,
+    max(1, r - inset)
   );
-  rim.addColorStop(0.55, `rgba(${ar}, ${ag}, ${ab}, ${strokeA * 0.74 * a})`);
-  rim.addColorStop(1, `rgba(${ir}, ${ig}, ${ib}, ${strokeA * 0.78 * a})`);
+  rim.addColorStop(0, `rgba(${sr}, ${sg}, ${sb}, ${rimA * a})`);
+  rim.addColorStop(0.55, `rgba(${tr}, ${tg}, ${tb}, ${rimA * 0.82 * a})`);
+  rim.addColorStop(1, `rgba(${tr}, ${tg}, ${tb}, ${rimA * 0.34 * a})`);
   ctx.strokeStyle = rim;
-  ctx.lineWidth = hover ? ms(1.7) : ms(1.25);
+  ctx.lineWidth = ms(1);
   ctx.lineJoin = "round";
   ctx.stroke();
   ctx.restore();
@@ -890,18 +909,16 @@ function platformDrawFinalActionBar(p, alpha) {
     }
   }
 
-  push();
-  translate(bar.x, bar.y);
-  platformDrawLiquidGlassButton(
+  platformDrawFrostedGlass(
+    bar.x,
+    bar.y,
     bar.w,
     bar.h,
     bar.h / 2,
     cfg.choiceButtonColor,
-    alpha,
     hoverKey !== null,
-    cfg.textColor
+    alpha
   );
-  pop();
 
   for (let key of ["home", "share", "menu"]) {
     let box = layout[key];
@@ -1939,45 +1956,146 @@ function platformDrawSoftPool(ctx, pl) {
   ctx.restore();
 }
 
-function platformDrawMainBackground() {
-  let ctx = drawingContext;
-  noStroke();
-  rectMode(CORNER);
+function platformInitMeshGrain() {
+  if (platformMeshGrainGfx) {
+    return;
+  }
 
-  // Clean warm-white base
-  let grad = ctx.createLinearGradient(0, 0, 0, platformH);
-  grad.addColorStop(0,   "#FAF6F0");
-  grad.addColorStop(0.5, "#F5EFE6");
-  grad.addColorStop(1,   "#EFE6D8");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, platformW, platformH);
+  platformMeshGrainGfx = createGraphics(platformW, platformH);
+  platformMeshGrainGfx.loadPixels();
+  let d = platformMeshGrainGfx.pixels;
 
-  // Warm drifting pools — large radius, smooth multi-stop fade
-  let t = frameCount * 0.022;
-  let pools = [
-    {
-      x: platformW * (0.30 + sin(t * 0.50) * 0.36),
-      y: platformH * (0.15 + cos(t * 0.38) * 0.16),
-      rx: platformW * 1.05, ry: platformH * 0.62,
-      rgb: [228, 185, 155], alpha: 0.26
-    },
-    {
-      x: platformW * (0.75 + cos(t * 0.44) * 0.30),
-      y: platformH * (0.72 + sin(t * 0.36) * 0.20),
-      rx: platformW * 1.00, ry: platformH * 0.65,
-      rgb: [215, 172, 118], alpha: 0.22
-    },
-    {
-      x: platformW * (0.20 + sin(t * 0.42) * 0.28),
-      y: platformH * (0.55 + cos(t * 0.46) * 0.24),
-      rx: platformW * 0.95, ry: platformH * 0.58,
-      rgb: [200, 155, 130], alpha: 0.18
-    }
+  for (let i = 0; i < d.length; i += 4) {
+    let v = floor(random(60, 200));
+    d[i] = d[i + 1] = d[i + 2] = v;
+    d[i + 3] = random() < 0.72 ? floor(random(16, 52)) : 0;
+  }
+
+  platformMeshGrainGfx.updatePixels();
+}
+
+function platformDrawMeshGrain(ctx) {
+  if (!platformMeshGrainGfx) {
+    platformInitMeshGrain();
+  }
+
+  ctx.save();
+  ctx.globalCompositeOperation = "overlay";
+  ctx.globalAlpha = 0.32;
+  ctx.drawImage(platformMeshGrainGfx.canvas, 0, 0);
+  ctx.restore();
+
+  ctx.save();
+  ctx.globalCompositeOperation = "soft-light";
+  ctx.globalAlpha = 0.1;
+  ctx.drawImage(platformMeshGrainGfx.canvas, 0, 0);
+  ctx.restore();
+}
+
+function platformAddMeshGradient(ctx, cx, cy, maxR, rgb, peakAlpha, kind) {
+  let [r, g, b] = rgb;
+  let rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
+
+  if (kind === "wisp") {
+    rg.addColorStop(0, `rgba(${r},${g},${b},${peakAlpha * 0.7})`);
+    rg.addColorStop(0.28, `rgba(${r},${g},${b},${peakAlpha * 0.5})`);
+    rg.addColorStop(0.55, `rgba(${r},${g},${b},${peakAlpha * 0.16})`);
+    rg.addColorStop(0.78, `rgba(${r},${g},${b},${peakAlpha * 0.04})`);
+    rg.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  } else {
+    rg.addColorStop(0, `rgba(${r},${g},${b},${peakAlpha})`);
+    rg.addColorStop(0.32, `rgba(${r},${g},${b},${peakAlpha * 0.68})`);
+    rg.addColorStop(0.56, `rgba(${r},${g},${b},${peakAlpha * 0.24})`);
+    rg.addColorStop(0.76, `rgba(${r},${g},${b},${peakAlpha * 0.07})`);
+    rg.addColorStop(1, `rgba(${r},${g},${b},0)`);
+  }
+
+  return rg;
+}
+
+function platformDrawMeshShape(ctx, shape) {
+  let maxR = max(shape.rx, shape.ry);
+
+  ctx.save();
+  ctx.translate(shape.x, shape.y);
+  ctx.rotate(shape.rot);
+  ctx.scale(shape.rx / maxR, shape.ry / maxR);
+  ctx.beginPath();
+  ctx.arc(0, 0, maxR, 0, Math.PI * 2);
+  ctx.fillStyle = platformAddMeshGradient(
+    ctx,
+    0,
+    0,
+    maxR,
+    shape.rgb,
+    shape.alpha,
+    shape.kind || "deep"
+  );
+  ctx.fill();
+  ctx.restore();
+}
+
+function platformGetMeshShapeMotion(shape, t) {
+  let phase = shape.phase || 0;
+  let s = sin(t * shape.speed + phase);
+  let c = cos(t * shape.speed * 0.76 + phase * 1.05);
+  let x =
+    platformW * shape.baseX +
+    s * platformW * shape.travelX +
+    c * platformW * (shape.travelX * 0.35);
+  let y =
+    platformH * shape.baseY +
+    c * platformH * shape.travelY +
+    s * platformH * (shape.travelY * 0.28);
+
+  if (shape.driftX != null && shape.driftY != null) {
+    x += s * platformW * shape.driftX;
+    y += s * platformH * shape.driftY;
+  }
+
+  let rot =
+    shape.baseRot + sin(t * shape.rotSpeed + phase) * shape.rotAmp;
+
+  return {
+    x,
+    y,
+    rot,
+    rx: platformW * shape.rx,
+    ry: platformH * shape.ry,
+    rgb: shape.rgb,
+    alpha: shape.alpha,
+    kind: shape.kind
+  };
+}
+
+function platformDrawMeshTextSafeZones(ctx) {
+  let zones = [
+    { cx: 0.5, cy: 0.12, r: 0.32, peak: 0.34 },
+    { cx: 0.5, cy: 0.36, r: 0.26, peak: 0.22 },
+    { cx: 0.5, cy: 0.8, r: 0.22, peak: 0.16 }
   ];
 
-  for (let pl of pools) {
-    platformDrawSoftPool(ctx, pl);
+  for (let z of zones) {
+    let g = ctx.createRadialGradient(
+      platformW * z.cx,
+      platformH * z.cy,
+      0,
+      platformW * z.cx,
+      platformH * z.cy,
+      platformH * z.r
+    );
+    g.addColorStop(0, `rgba(255, 255, 255, ${z.peak})`);
+    g.addColorStop(0.55, `rgba(255, 255, 255, ${z.peak * 0.38})`);
+    g.addColorStop(1, "rgba(255, 255, 255, 0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, platformW, platformH);
   }
+}
+
+function platformDrawMainBackground() {
+  noStroke();
+  rectMode(CORNER);
+  background("#FFFFFF");
 }
 
 function platformDrawIntro() {
@@ -2554,7 +2672,7 @@ function platformApplyViewportLayout() {
   POSTER_LAYOUT.headerLineY = platformLayoutY(60) + ms(20);
   POSTER_LAYOUT.headerTextY = platformLayoutY(34) + ms(5) + ms(20);
   POSTER_LAYOUT.choiceY =
-    platformText.questionTitle.y - ms(168) - ms(45);
+    platformText.questionTitle.y - POSTER_LAYOUT.choiceH - ms(35);
   POSTER_LAYOUT.answerTop = platformLayoutY(715);
   POSTER_LAYOUT.footerTop = platformLayoutY(882);
   POSTER_LAYOUT.finalTextCenterOffset = platformLayoutY(24);
@@ -6373,36 +6491,36 @@ function platformGetChoiceImageDrawSize(img, maxSize) {
   };
 }
 
-function platformGetChoicePanelLayout(w, h, label, img, font, imgId = "") {
+function platformGetChoicePanelLayout(w, label, img, font, imgId = "") {
+  let btnH = POSTER_LAYOUT.choiceBtnH;
   let tweaks = platformChoiceImageTweaks[imgId] || {};
-  let imgSlotH = POSTER_LAYOUT.choiceImageSize;
+  let imgSlotH = min(POSTER_LAYOUT.choiceImageSize, btnH * 0.58);
   let drawSize = platformGetChoiceImageDrawSize(
     img,
     imgSlotH * (tweaks.maxSizeScale ?? 1)
   );
   let labelSize = platformText.choiceLabel.size;
-  let labelGap = platformText.choiceLabel.yOffset;
+  let labelGap = POSTER_LAYOUT.choiceLabelGap;
   let labelLeading = max(labelSize * 1.15, ms(16));
   let labelH = platformMeasureChoiceLabelBlock(
-    "Disposable cutlery",
+    label,
     font,
     labelSize,
     labelLeading
   );
   let visualOff = platformGetChoiceImageVisualOffset(img);
   let imgVisualShiftY = visualOff.y * drawSize.scale;
-  let contentH = imgSlotH + labelGap + labelH;
-  let contentTop = (h - contentH) / 2;
 
   return {
+    btnH,
     imgX: w / 2 - visualOff.x * drawSize.scale,
-    imgCenterY:
-      contentTop + imgSlotH / 2 - imgVisualShiftY + (tweaks.offsetY || 0),
+    imgCenterY: btnH / 2 - imgVisualShiftY + (tweaks.offsetY || 0),
     imgW: drawSize.w,
     imgH: drawSize.h,
-    labelY: contentTop + imgSlotH + labelGap,
+    labelY: btnH + labelGap,
     labelLeading,
-    labelSize
+    labelSize,
+    totalH: btnH + labelGap + labelH
   };
 }
 
@@ -6435,16 +6553,32 @@ function platformDrawChoicePanel(config) {
   let side = abs(x - leftBoxX) < 1 ? "left" : "right";
   let wrongShakeX = platformGetWrongShakeX(animalId, side);
   let s = hover ? 1.04 : 1;
-  let cornerR = POSTER_LAYOUT.choiceCornerRadius;
+  let cornerR = POSTER_LAYOUT.choiceGlassCornerRadius;
+
+  let layout = platformGetChoicePanelLayout(w, label, img, font, imgId);
+
+  // Frosted glass slab in screen space so its backdrop capture aligns.
+  let glassCx = x + wrongShakeX + w / 2;
+  let glassBw = w * s;
+  let glassBh = layout.btnH * s;
+  let glassBx = glassCx - glassBw / 2;
+  let glassBy = y + (layout.btnH - glassBh) / 2;
+  platformDrawFrostedGlass(
+    glassBx,
+    glassBy,
+    glassBw,
+    glassBh,
+    cornerR * s,
+    buttonColor,
+    hover,
+    255,
+    side === "left" ? -1 : 1
+  );
 
   push();
   translate(x + w / 2 + wrongShakeX, y + h / 2);
   scale(s);
   translate(-w / 2, -h / 2);
-
-  platformDrawLiquidGlassButton(w, h, cornerR, buttonColor, 255, hover, textColor);
-
-  let layout = platformGetChoicePanelLayout(w, h, label, img, font, imgId);
 
   imageMode(CENTER);
   if (img) {
@@ -6515,6 +6649,52 @@ function platformDrawQuestionTitle(textColor) {
   );
 }
 
+function platformGetWrongTryAgainY() {
+  return POSTER_LAYOUT.choiceY - ms(34) + 30;
+}
+
+function platformGetWrongTryAgainAlpha(p) {
+  if (p.wrongRiseActive) {
+    let t = wrongFallGetRiseT(p);
+    return 255 * (1 - constrain(t / WRONG_TRY_AGAIN_FADE_OUT, 0, 1));
+  }
+
+  if (p.wrongWaitActive) {
+    return 255;
+  }
+
+  if (p.wrongFallActive) {
+    let total = wrongFallTotalFrames(p);
+    let showAt = total * WRONG_TRY_AGAIN_FALL_START;
+    if (p.wrongFallT < showAt) {
+      return 0;
+    }
+    return 255 * constrain((p.wrongFallT - showAt) / 6, 0, 1);
+  }
+
+  return 0;
+}
+
+function platformDrawWrongTryAgain(p, textColor) {
+  let alpha = platformGetWrongTryAgainAlpha(p);
+  if (alpha <= 0) {
+    return;
+  }
+
+  let ink = color(textColor);
+  ink.setAlpha(alpha);
+  fill(ink);
+  noStroke();
+  textSize(platformText.questionTitle.size);
+  platformDrawTightWordText(
+    platformText.tryAgain.text,
+    platformText.questionTitle.x,
+    platformGetWrongTryAgainY(),
+    platformText.questionTitle.leading,
+    "center"
+  );
+}
+
 function platformGetQuestionStageCount(p) {
   let stages = p.cfg.choiceStages || platformChoiceStages;
   return stages.length;
@@ -6528,6 +6708,58 @@ function platformGetProgressBaseY() {
   );
 }
 
+function platformEaseOutCubic(t) {
+  return 1 - Math.pow(1 - constrain(t, 0, 1), 3);
+}
+
+function platformStartProgressFill(p, index) {
+  p.progressFillActive = true;
+  p.progressFillT = 0;
+  p.progressFillIndex = index;
+}
+
+function platformTickProgressFill(p) {
+  if (!p.progressFillActive) {
+    return;
+  }
+  p.progressFillT++;
+  if (p.progressFillT >= PROGRESS_FILL_FRAMES) {
+    p.progressFillActive = false;
+    p.progressFillT = PROGRESS_FILL_FRAMES;
+    p.progressFillIndex = -1;
+  }
+}
+
+function platformGetProgressPillFillAmt(p, index, currentIndex) {
+  if (p.progressFillActive && index === p.progressFillIndex) {
+    return platformEaseOutCubic(p.progressFillT / PROGRESS_FILL_FRAMES);
+  }
+  if (index <= currentIndex) {
+    return 1;
+  }
+  return 0;
+}
+
+function platformDrawProgressPill(cx, y, pillW, pillH, pillR, fillAmt, brown, brownMuted) {
+  noStroke();
+  fill(brownMuted);
+  rect(cx, y, pillW, pillH, pillR);
+
+  if (fillAmt <= 0) {
+    return;
+  }
+
+  fill(brown);
+  if (fillAmt >= 1) {
+    rect(cx, y, pillW, pillH, pillR);
+    return;
+  }
+
+  let x0 = cx - pillW / 2;
+  let fw = max(pillH, pillW * fillAmt);
+  rect(x0 + fw / 2, y, fw, pillH, pillR);
+}
+
 function platformDrawQuestionProgress(p) {
   let cfg = p.cfg;
   let total = platformGetQuestionStageCount(p);
@@ -6535,10 +6767,11 @@ function platformDrawQuestionProgress(p) {
     return;
   }
 
-  let dotR = POSTER_LAYOUT.progressDotR;
-  let dotD = dotR * 2;
+  let pillW = POSTER_LAYOUT.progressPillW;
+  let pillH = POSTER_LAYOUT.progressPillH;
+  let pillR = POSTER_LAYOUT.progressPillRadius;
   let stepGap = POSTER_LAYOUT.progressStepGap;
-  let y = platformGetProgressBaseY() + dotR;
+  let y = platformGetProgressBaseY() + pillH / 2;
   let brown = color(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 255);
   let brownMuted = color(
     PLATFORM_TEXT_RGB[0],
@@ -6546,52 +6779,19 @@ function platformDrawQuestionProgress(p) {
     PLATFORM_TEXT_RGB[2],
     POSTER_LAYOUT.progressUpcomingAlpha
   );
-  let lineMuted = color(
-    PLATFORM_TEXT_RGB[0],
-    PLATFORM_TEXT_RGB[1],
-    PLATFORM_TEXT_RGB[2],
-    POSTER_LAYOUT.progressLineInactiveAlpha
-  );
-  // clickCount 0 → Q1 (dot 0 outlined), 1 → Q2, 2 → Q3
+  // clickCount 0 → Q1 (step 0 filled), 1 → steps 0–1 filled, 2 → all filled
   let currentIndex = constrain(p.clickCount, 0, total - 1);
   let startX = platformW / 2 - (stepGap * (total - 1)) / 2;
 
   push();
   drawingContext.globalAlpha = 1;
-  strokeCap(ROUND);
-  ellipseMode(CENTER);
-
-  for (let i = 0; i < total - 1; i++) {
-    let x1 = startX + i * stepGap + dotR;
-    let x2 = startX + (i + 1) * stepGap - dotR;
-
-    if (i < currentIndex) {
-      stroke(brown);
-      strokeWeight(POSTER_LAYOUT.progressLineWeightActive);
-    } else {
-      stroke(lineMuted);
-      strokeWeight(POSTER_LAYOUT.progressLineWeightInactive);
-    }
-    line(x1, y, x2, y);
-  }
+  rectMode(CENTER);
+  noStroke();
 
   for (let i = 0; i < total; i++) {
     let cx = startX + i * stepGap;
-
-    if (i < currentIndex) {
-      noStroke();
-      fill(brown);
-      ellipse(cx, y, dotD, dotD);
-    } else if (i === currentIndex) {
-      noFill();
-      stroke(brown);
-      strokeWeight(POSTER_LAYOUT.progressDotStrokeWeight);
-      ellipse(cx, y, dotD, dotD);
-    } else {
-      noStroke();
-      fill(brownMuted);
-      ellipse(cx, y, dotD, dotD);
-    }
+    let fillAmt = platformGetProgressPillFillAmt(p, i, currentIndex);
+    platformDrawProgressPill(cx, y, pillW, pillH, pillR, fillAmt, brown, brownMuted);
   }
 
   pop();
@@ -6749,9 +6949,11 @@ const POSTER_LAYOUT = {
   finalMessageNudgeY: -60,
   finalPosterNudgeY: ms(90),
   feedbackNudgeY: -25,
-  choiceW: ms(168),
-  choiceH: ms(168),
-  choiceY: platformText.questionTitle.y - ms(168) - ms(45),
+  choiceW: ms(220),
+  choiceBtnH: ms(108),
+  choiceH: ms(162),
+  choiceLabelGap: ms(18),
+  choiceY: platformText.questionTitle.y - ms(162) - ms(35),
   answerTop: my(715),
   footerTop: my(882),
   finalTextCenterOffset: my(24),
@@ -6759,6 +6961,7 @@ const POSTER_LAYOUT = {
   finalFade: 900,
   choiceImageSize: ms(92),
   choiceCornerRadius: ms(14),
+  choiceGlassCornerRadius: ms(20),
   choiceCenterPull: ms(22),
   finalTitleYOffset: 2,
   finalContentYOffset: -10,
@@ -6781,14 +6984,12 @@ const POSTER_LAYOUT = {
   shareIconTouchSize: ms(52),
   frameStrokeWeight: 0.9,
   questionPhaseNudgeY: -10,
-  progressGapBelowQuestion: ms(16),
-  progressDotR: ms(9),
-  progressDotStrokeWeight: ms(2.8),
-  progressStepGap: ms(66),
-  progressLineWeightActive: ms(2.8),
-  progressLineWeightInactive: ms(1.4),
+  progressGapBelowQuestion: ms(21),
+  progressPillW: ms(38),
+  progressPillH: ms(7),
+  progressPillRadius: ms(3.5),
+  progressStepGap: ms(64),
   progressUpcomingAlpha: 44,
-  progressLineInactiveAlpha: 50,
   looseDefaultTop: my(120),
   looseDefaultBottom: my(720),
   choiceKeepOutTop: my(670),
@@ -6837,7 +7038,10 @@ function posterCreateState(id, cfg) {
     wrongRiseT: 0,
     wrongRiseActive: false,
     wrongFallEls: null,
-    wrongFallPieces: null
+    wrongFallPieces: null,
+    progressFillActive: false,
+    progressFillT: 0,
+    progressFillIndex: -1
   };
 }
 
@@ -7521,6 +7725,9 @@ function posterRestartFromWrongAnswer(p) {
   }
 
   p.clickCount = 0;
+  p.progressFillActive = false;
+  p.progressFillT = 0;
+  p.progressFillIndex = -1;
   p.disassembleBoost = 320;
   p.disassembleRepelWarmup = 0;
   p.looseRepelBlendT = 0;
@@ -7557,6 +7764,9 @@ function posterReset(p) {
   p.wrongRiseActive = false;
   p.wrongFallEls = null;
   p.wrongFallPieces = null;
+  p.progressFillActive = false;
+  p.progressFillT = 0;
+  p.progressFillIndex = -1;
 }
 
 function posterResetAll() {
@@ -7789,6 +7999,8 @@ function posterDrawQuestionUI(p) {
   platformDrawQuestionTitle(cfg.textColor);
   pop();
 
+  platformDrawWrongTryAgain(p, cfg.textColor);
+
   // Progress bar — its own fall
   let fProg = wrongFallGetElemTransform(p, "progress");
   push();
@@ -7991,6 +8203,7 @@ function posterDraw(id) {
   let p = posterRegistry[id];
   let cfg = p.cfg;
   posterTickWrongAnimation(p);
+  platformTickProgressFill(p);
   platformLooseBeginRepelFrame(p);
   platformLooseTickRepelBlend(p);
   platformTickPosterDisassemble(p);
@@ -8013,6 +8226,7 @@ function posterHandleChoicePress(id) {
   let p = posterRegistry[id];
   let cfg = p.cfg;
   if (p.wrongFallActive || p.wrongWaitActive || p.wrongRiseActive) return;
+  if (p.progressFillActive) return;
   if (p.clickCount >= cfg.finalClickCount) return;
 
   let clickedLeft = platformWasBoxClicked(p.leftBox);
@@ -8030,7 +8244,9 @@ function posterHandleChoicePress(id) {
     (correctSide === "left" && clickedRight);
 
   if (clickedCorrect) {
-    p.clickCount = cfg.nextClickCount(stage);
+    let newCount = cfg.nextClickCount(stage);
+    p.clickCount = newCount;
+    platformStartProgressFill(p, newCount);
 
     if (id === "toad") {
       p.toadRepelBoost = 160;
