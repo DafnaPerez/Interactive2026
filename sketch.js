@@ -808,31 +808,29 @@ function platformDrawLiquidGlassButton(
   platformDrawFrostedGlass(bx, by, w, h, cornerR, accentColor, hover, alpha);
 }
 
-// Elevated 3D glass card — layered float shadows, a beveled body,
-// crisp specular gloss, and a light-catching rim. Bright, not grey.
+// Elevated 3D glass card — clean white body, soft top gloss, underside shadow.
 function platformDrawChoiceButton(bx, by, bw, bh, cornerR, hover = false, alpha = 255) {
   let ctx = drawingContext;
   let r = min(cornerR, bw / 2, bh / 2);
   let a = alpha / 255;
+  let yB = by + bh;
 
-  // --- Soft ambient shadow (wide, warm, faint) ---
   ctx.save();
   platformRoundRectPath(ctx, bx, by, bw, bh, r);
   ctx.shadowColor = `rgba(84, 66, 50, ${(hover ? 0.2 : 0.14) * a})`;
-  ctx.shadowBlur = ms(hover ? 40 : 30);
+  ctx.shadowBlur = ms(hover ? 36 : 26);
   ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = ms(hover ? 22 : 16);
+  ctx.shadowOffsetY = ms(hover ? 14 : 9);
   ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
   ctx.fill();
   ctx.restore();
 
-  // --- Tight contact shadow (crisp, close, sells the lift) ---
   ctx.save();
   platformRoundRectPath(ctx, bx, by, bw, bh, r);
-  ctx.shadowColor = `rgba(70, 54, 40, ${(hover ? 0.24 : 0.18) * a})`;
-  ctx.shadowBlur = ms(hover ? 10 : 7);
+  ctx.shadowColor = `rgba(70, 54, 40, ${(hover ? 0.22 : 0.16) * a})`;
+  ctx.shadowBlur = ms(hover ? 8 : 6);
   ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = ms(hover ? 5 : 3);
+  ctx.shadowOffsetY = ms(hover ? 4 : 3);
   ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
   ctx.fill();
   ctx.restore();
@@ -841,71 +839,29 @@ function platformDrawChoiceButton(bx, by, bw, bh, cornerR, hover = false, alpha 
   platformRoundRectPath(ctx, bx, by, bw, bh, r);
   ctx.clip();
 
-  // --- Body: bright warm-white with a gentle domed fall-off ---
-  let body = ctx.createLinearGradient(bx, by, bx, by + bh);
+  let body = ctx.createLinearGradient(bx, by, bx, yB);
   body.addColorStop(0, `rgba(255, 255, 255, ${a})`);
-  body.addColorStop(0.5, `rgba(255, 253, 250, ${a})`);
-  body.addColorStop(1, `rgba(250, 245, 239, ${a})`);
+  body.addColorStop(1, `rgba(248, 245, 241, ${a})`);
   ctx.fillStyle = body;
   ctx.fillRect(bx, by, bw, bh);
 
-  // --- Big glossy sheen across the top half (the dome highlight) ---
-  let sheenH = bh * 0.6;
-  let sheen = ctx.createLinearGradient(bx, by, bx, by + sheenH);
-  sheen.addColorStop(0, `rgba(255, 255, 255, ${(hover ? 0.95 : 0.85) * a})`);
-  sheen.addColorStop(0.6, `rgba(255, 255, 255, ${0.28 * a})`);
+  let sheen = ctx.createLinearGradient(bx, by, bx, by + bh * 0.55);
+  sheen.addColorStop(0, `rgba(255, 255, 255, ${(hover ? 0.82 : 0.72) * a})`);
   sheen.addColorStop(1, `rgba(255, 255, 255, 0)`);
   ctx.fillStyle = sheen;
-  ctx.fillRect(bx, by, bw, sheenH);
+  ctx.fillRect(bx, by, bw, bh);
 
-  // --- Crisp specular gloss band near the top (wet-glass shine) ---
-  let glossTop = by + bh * 0.08;
-  let glossH = bh * 0.26;
-  let gloss = ctx.createLinearGradient(bx, glossTop, bx, glossTop + glossH);
-  gloss.addColorStop(0, `rgba(255, 255, 255, 0)`);
-  gloss.addColorStop(0.5, `rgba(255, 255, 255, ${(hover ? 0.9 : 0.78) * a})`);
-  gloss.addColorStop(1, `rgba(255, 255, 255, 0)`);
-  ctx.fillStyle = gloss;
-  // Inset the band slightly so it reads as a floating reflection.
-  ctx.fillRect(bx + bw * 0.06, glossTop, bw * 0.88, glossH);
-
-  // --- Soft lower reflection so the base still feels rounded ---
-  let reflH = bh * 0.32;
-  let refl = ctx.createLinearGradient(bx, by + bh - reflH, bx, by + bh);
-  refl.addColorStop(0, `rgba(255, 255, 255, 0)`);
-  refl.addColorStop(1, `rgba(255, 255, 255, ${0.45 * a})`);
-  ctx.fillStyle = refl;
-  ctx.fillRect(bx, by + bh - reflH, bw, reflH);
-
-  // --- Warm inner base shadow for thickness (kept light, not grey) ---
-  let baseH = bh * 0.22;
-  let base = ctx.createLinearGradient(bx, by + bh - baseH, bx, by + bh);
-  base.addColorStop(0, `rgba(150, 120, 96, 0)`);
-  base.addColorStop(1, `rgba(150, 120, 96, ${0.14 * a})`);
-  ctx.fillStyle = base;
-  ctx.fillRect(bx, by + bh - baseH, bw, baseH);
+  let shadeCx = bx + bw * 0.58;
+  let shadeCy = yB - bh * 0.08;
+  let shadeR = bw * 0.72;
+  let shade = ctx.createRadialGradient(shadeCx, shadeCy, 0, shadeCx, shadeCy, shadeR);
+  shade.addColorStop(0, `rgba(88, 70, 54, ${(hover ? 0.22 : 0.17) * a})`);
+  shade.addColorStop(0.45, `rgba(108, 86, 68, ${0.08 * a})`);
+  shade.addColorStop(1, `rgba(150, 120, 96, 0)`);
+  ctx.fillStyle = shade;
+  ctx.fillRect(bx, by, bw, bh);
   ctx.restore();
 
-  // --- Beveled top edge: bright inner highlight for a raised lip ---
-  ctx.save();
-  platformRoundRectPath(
-    ctx,
-    bx + ms(1.4),
-    by + ms(1.4),
-    bw - ms(2.8),
-    bh - ms(2.8),
-    max(1, r - ms(1.4))
-  );
-  let bevel = ctx.createLinearGradient(bx, by, bx, by + bh * 0.5);
-  bevel.addColorStop(0, `rgba(255, 255, 255, ${(hover ? 0.95 : 0.85) * a})`);
-  bevel.addColorStop(1, `rgba(255, 255, 255, 0)`);
-  ctx.strokeStyle = bevel;
-  ctx.lineWidth = ms(1.4);
-  ctx.lineJoin = "round";
-  ctx.stroke();
-  ctx.restore();
-
-  // --- Outer rim: bright top → faint warm base edge ---
   ctx.save();
   platformRoundRectPath(
     ctx,
@@ -915,10 +871,10 @@ function platformDrawChoiceButton(bx, by, bw, bh, cornerR, hover = false, alpha 
     bh - 1.2,
     max(1, r - 0.6)
   );
-  let rim = ctx.createLinearGradient(bx, by, bx, by + bh);
-  rim.addColorStop(0, `rgba(255, 255, 255, ${a})`);
-  rim.addColorStop(0.45, `rgba(255, 255, 255, ${0.12 * a})`);
-  rim.addColorStop(1, `rgba(120, 98, 80, ${0.12 * a})`);
+  let rim = ctx.createLinearGradient(bx, by, bx, yB);
+  rim.addColorStop(0, `rgba(255, 255, 255, ${0.9 * a})`);
+  rim.addColorStop(0.5, `rgba(255, 255, 255, ${0.08 * a})`);
+  rim.addColorStop(1, `rgba(100, 82, 66, ${0.14 * a})`);
   ctx.strokeStyle = rim;
   ctx.lineWidth = ms(1);
   ctx.lineJoin = "round";
@@ -6584,16 +6540,16 @@ function platformGetChoiceImageVisualOffset(img) {
 }
 
 const platformChoiceImageTweaks = {
-  plasticBag: { maxSizeScale: 0.9 },
-  fabricBag: { maxSizeScale: 0.9, offsetY: 0 },
-  plasticBottle: { maxSizeScale: 0.9 },
-  reusableBottle: { maxSizeScale: 0.9 },
-  garbageBin: { maxSizeScale: 0.85 },
-  sandwichPlastic: { maxSizeScale: 0.85, offsetY: -2 },
-  glassCup: { maxSizeScale: 0.85 },
-  plasticCup: { maxSizeScale: 0.85 },
-  plasticFork: { maxSizeScale: 0.82, offsetY: -5 },
-  reusableFork: { maxSizeScale: 0.82, offsetY: -5 }
+  plasticBag: { maxSizeScale: 1.05 },
+  fabricBag: { maxSizeScale: 1.05 },
+  plasticBottle: { maxSizeScale: 1.05 },
+  reusableBottle: { maxSizeScale: 1.05 },
+  garbageBin: { maxSizeScale: 1 },
+  sandwichPlastic: { maxSizeScale: 1 },
+  glassCup: { maxSizeScale: 1 },
+  plasticCup: { maxSizeScale: 1 },
+  plasticFork: { maxSizeScale: 0.98 },
+  reusableFork: { maxSizeScale: 0.98 }
 };
 
 function platformGetChoiceImageDrawSize(img, maxSize) {
@@ -6612,7 +6568,7 @@ function platformGetChoiceImageDrawSize(img, maxSize) {
 function platformGetChoicePanelLayout(w, label, img, font, imgId = "") {
   let btnH = POSTER_LAYOUT.choiceBtnH;
   let tweaks = platformChoiceImageTweaks[imgId] || {};
-  let imgSlotH = min(POSTER_LAYOUT.choiceImageSize, btnH * 0.58);
+  let imgSlotH = min(POSTER_LAYOUT.choiceImageSize, btnH * 0.72);
   let drawSize = platformGetChoiceImageDrawSize(
     img,
     imgSlotH * (tweaks.maxSizeScale ?? 1)
@@ -6626,13 +6582,11 @@ function platformGetChoicePanelLayout(w, label, img, font, imgId = "") {
     labelSize,
     labelLeading
   );
-  let visualOff = platformGetChoiceImageVisualOffset(img);
-  let imgVisualShiftY = visualOff.y * drawSize.scale;
 
   return {
     btnH,
-    imgX: w / 2 - visualOff.x * drawSize.scale,
-    imgCenterY: btnH / 2 - imgVisualShiftY + (tweaks.offsetY || 0),
+    imgX: w / 2,
+    imgCenterY: btnH / 2 + (tweaks.offsetY || 0),
     imgW: drawSize.w,
     imgH: drawSize.h,
     labelY: btnH + labelGap,
@@ -6697,16 +6651,14 @@ function platformDrawChoicePanel(config) {
 
   imageMode(CENTER);
   if (img) {
-    tint(255, 255, 255, 255);
-    image(img, layout.imgX, layout.imgCenterY, layout.imgW, layout.imgH);
     noTint();
+    image(img, layout.imgX, layout.imgCenterY, layout.imgW, layout.imgH);
   }
   if (overlayImg) {
     push();
-    tint(255, 255, 255, 255);
+    noTint();
     blendMode(overlayBlendMode === "multiply" ? MULTIPLY : BLEND);
     image(overlayImg, layout.imgX, layout.imgCenterY, layout.imgW, layout.imgH);
-    noTint();
     pop();
   }
 
@@ -7068,7 +7020,7 @@ const POSTER_LAYOUT = {
   finalMessageNudgeY: -60,
   finalPosterNudgeY: ms(90),
   feedbackNudgeY: -25,
-  choiceW: ms(220),
+  choiceW: ms(200),
   choiceBtnH: ms(108),
   choiceH: ms(162),
   choiceLabelGap: ms(18),
@@ -7078,7 +7030,7 @@ const POSTER_LAYOUT = {
   finalTextCenterOffset: my(24),
   finalIntro: 4000,
   finalFade: 900,
-  choiceImageSize: ms(92),
+  choiceImageSize: ms(108),
   choiceCornerRadius: ms(14),
   choiceGlassCornerRadius: ms(20),
   choiceCenterPull: ms(22),
