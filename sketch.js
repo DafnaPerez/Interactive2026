@@ -27,7 +27,7 @@ let platformSharePreviewImage = null;
 let platformSharePreviewCapturePending = false;
 let platformSharePreviewStill = false;
 let platformShareFrozenFrame = 0;
-const PLATFORM_SHARE_FADE_MS = 260;
+const PLATFORM_SHARE_SLIDE_MS = 340;
 let platformShareWhatsappLogo = null;
 let platformShareInstagramLogo = null;
 let platformShareFacebookLogo = null;
@@ -181,7 +181,6 @@ const ANIMAL_SCREEN_OFFSET_Y = 50;
 const DEER_HYENA_EXTRA_SCREEN_OFFSET_Y = 20;
 const INTRO_TRIANGLES_OFFSET_Y = -50;
 const INTRO_SCREEN_NUDGE_Y = ms(50);
-const PLATFORM_SHARE_OVERLAY_NUDGE_Y = -ms(50);
 
 const WRONG_WAIT_FRAMES = 60; // 1 s pause
 const WRONG_RISE_FRAMES = 38;
@@ -339,7 +338,6 @@ function wrongFallGetPieceDrawOffset(p, index, cfg) {
 }
 const PLATFORM_SHARE_BACKDROP_DARKEN = 0.82;
 const PLATFORM_SHARE_BACKDROP_BLUR_PX = 22;
-const PLATFORM_SHARE_CLOSE_SIZE = ms(54);
 const PLATFORM_SHARE_BACK_NUDGE_Y = ms(10);
 const PLATFORM_SHARE_ICONS_NUDGE_Y = ms(10);
 const PLATFORM_LOADING_TRIANGLE_SIZE = mx(72);
@@ -411,12 +409,14 @@ function posterDrawAnimalSharePreview(p, rectBox) {
   let screenScale = rectBox.w / platformW;
   let tuning = platformGetSharePreviewTuning(platformMode);
   let animalScale = (platformW / ANIMAL_REF_W) * screenScale * tuning.scale;
+  let previewNudgeY = POSTER_LAYOUT.sharePreviewAnimalNudgeY;
   translate(
     rectBox.x + rectBox.w / 2 + tuning.screenX,
     rectBox.y +
       rectBox.h / 2 +
       ANIMAL_SCREEN_OFFSET_Y * screenScale +
-      tuning.screenY
+      tuning.screenY +
+      previewNudgeY
   );
   scale(animalScale);
   translate(
@@ -795,6 +795,18 @@ function platformRoundRectPath(ctx, x, y, w, h, radius) {
   ctx.closePath();
 }
 
+function platformRoundRectTopPath(ctx, x, y, w, h, radius) {
+  let r = min(radius, w / 2, h);
+  ctx.beginPath();
+  ctx.moveTo(x, y + h);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h);
+  ctx.closePath();
+}
+
 function platformDrawLiquidGlassButton(
   bx,
   by,
@@ -808,7 +820,7 @@ function platformDrawLiquidGlassButton(
   platformDrawFrostedGlass(bx, by, w, h, cornerR, accentColor, hover, alpha);
 }
 
-// Elevated 3D glass card — clean white body, soft top gloss, underside shadow.
+// Elevated 3D glass card — neutral warm-white body, soft gloss, gentle depth.
 function platformDrawChoiceButton(bx, by, bw, bh, cornerR, hover = false, alpha = 255) {
   let ctx = drawingContext;
   let r = min(cornerR, bw / 2, bh / 2);
@@ -817,21 +829,21 @@ function platformDrawChoiceButton(bx, by, bw, bh, cornerR, hover = false, alpha 
 
   ctx.save();
   platformRoundRectPath(ctx, bx, by, bw, bh, r);
-  ctx.shadowColor = `rgba(84, 66, 50, ${(hover ? 0.2 : 0.14) * a})`;
-  ctx.shadowBlur = ms(hover ? 36 : 26);
+  ctx.shadowColor = `rgba(68, 62, 56, ${(hover ? 0.2 : 0.16) * a})`;
+  ctx.shadowBlur = ms(hover ? 34 : 26);
   ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = ms(hover ? 14 : 9);
-  ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+  ctx.shadowOffsetY = ms(hover ? 13 : 9);
+  ctx.fillStyle = `rgba(255, 254, 252, ${a})`;
   ctx.fill();
   ctx.restore();
 
   ctx.save();
   platformRoundRectPath(ctx, bx, by, bw, bh, r);
-  ctx.shadowColor = `rgba(70, 54, 40, ${(hover ? 0.22 : 0.16) * a})`;
+  ctx.shadowColor = `rgba(58, 54, 48, ${(hover ? 0.17 : 0.13) * a})`;
   ctx.shadowBlur = ms(hover ? 8 : 6);
   ctx.shadowOffsetX = 0;
   ctx.shadowOffsetY = ms(hover ? 4 : 3);
-  ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+  ctx.fillStyle = `rgba(255, 254, 252, ${a})`;
   ctx.fill();
   ctx.restore();
 
@@ -840,24 +852,24 @@ function platformDrawChoiceButton(bx, by, bw, bh, cornerR, hover = false, alpha 
   ctx.clip();
 
   let body = ctx.createLinearGradient(bx, by, bx, yB);
-  body.addColorStop(0, `rgba(255, 255, 255, ${a})`);
-  body.addColorStop(1, `rgba(248, 245, 241, ${a})`);
+  body.addColorStop(0, `rgba(255, 254, 252, ${a})`);
+  body.addColorStop(1, `rgba(249, 246, 242, ${a})`);
   ctx.fillStyle = body;
   ctx.fillRect(bx, by, bw, bh);
 
-  let sheen = ctx.createLinearGradient(bx, by, bx, by + bh * 0.55);
-  sheen.addColorStop(0, `rgba(255, 255, 255, ${(hover ? 0.82 : 0.72) * a})`);
-  sheen.addColorStop(1, `rgba(255, 255, 255, 0)`);
+  let sheen = ctx.createLinearGradient(bx, by, bx, by + bh * 0.52);
+  sheen.addColorStop(0, `rgba(255, 254, 250, ${(hover ? 0.76 : 0.64) * a})`);
+  sheen.addColorStop(1, `rgba(255, 254, 250, 0)`);
   ctx.fillStyle = sheen;
   ctx.fillRect(bx, by, bw, bh);
 
   let shadeCx = bx + bw * 0.58;
   let shadeCy = yB - bh * 0.08;
-  let shadeR = bw * 0.72;
+  let shadeR = bw * 0.7;
   let shade = ctx.createRadialGradient(shadeCx, shadeCy, 0, shadeCx, shadeCy, shadeR);
-  shade.addColorStop(0, `rgba(88, 70, 54, ${(hover ? 0.22 : 0.17) * a})`);
-  shade.addColorStop(0.45, `rgba(108, 86, 68, ${0.08 * a})`);
-  shade.addColorStop(1, `rgba(150, 120, 96, 0)`);
+  shade.addColorStop(0, `rgba(98, 90, 82, ${(hover ? 0.12 : 0.09) * a})`);
+  shade.addColorStop(0.48, `rgba(112, 104, 96, ${0.035 * a})`);
+  shade.addColorStop(1, `rgba(126, 118, 110, 0)`);
   ctx.fillStyle = shade;
   ctx.fillRect(bx, by, bw, bh);
   ctx.restore();
@@ -872,9 +884,9 @@ function platformDrawChoiceButton(bx, by, bw, bh, cornerR, hover = false, alpha 
     max(1, r - 0.6)
   );
   let rim = ctx.createLinearGradient(bx, by, bx, yB);
-  rim.addColorStop(0, `rgba(255, 255, 255, ${0.9 * a})`);
-  rim.addColorStop(0.5, `rgba(255, 255, 255, ${0.08 * a})`);
-  rim.addColorStop(1, `rgba(100, 82, 66, ${0.14 * a})`);
+  rim.addColorStop(0, `rgba(255, 254, 250, ${0.9 * a})`);
+  rim.addColorStop(0.55, `rgba(255, 254, 250, ${0.06 * a})`);
+  rim.addColorStop(1, `rgba(136, 126, 116, ${0.17 * a})`);
   ctx.strokeStyle = rim;
   ctx.lineWidth = ms(1);
   ctx.lineJoin = "round";
@@ -938,7 +950,15 @@ function platformDrawFrostedGlass(
   ctx.restore();
 }
 
-function platformDrawFinalActionIcon(box, img, alpha, hover, iconNudgeY = 0, maxSize) {
+function platformDrawFinalActionIcon(
+  box,
+  img,
+  alpha,
+  hover,
+  iconNudgeY = 0,
+  maxSize,
+  brownTint = false
+) {
   if (!img || img.width <= 0) {
     return;
   }
@@ -953,7 +973,11 @@ function platformDrawFinalActionIcon(box, img, alpha, hover, iconNudgeY = 0, max
   translate(cx, cy);
   scale(hover ? 1.05 : 1);
   imageMode(CENTER);
-  tint(255, alpha);
+  if (brownTint) {
+    tint(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], alpha);
+  } else {
+    tint(255, alpha);
+  }
   drawingContext.imageSmoothingEnabled = true;
   drawingContext.imageSmoothingQuality = "high";
   image(img, 0, 0, drawW, drawH);
@@ -962,8 +986,23 @@ function platformDrawFinalActionIcon(box, img, alpha, hover, iconNudgeY = 0, max
   imageMode(CORNER);
 }
 
+function platformDrawFinalActionIntroTriangle(
+  box,
+  animal,
+  alpha,
+  hover,
+  iconNudgeY,
+  size,
+  iconNudgeX = 0
+) {
+  push();
+  translate(box.x + box.w / 2 + iconNudgeX, box.y + box.h / 2 + iconNudgeY);
+  scale(hover ? 1.05 : 1);
+  platformDrawMenuAnimalTriangle(animal, 0, 0, size, alpha);
+  pop();
+}
+
 function platformDrawFinalActionBar(p, alpha) {
-  let cfg = p.cfg;
   let layout = platformGetFinalActionBarLayout(p);
   p.finalActionBoxes = layout;
   let bar = layout.bar;
@@ -983,34 +1022,40 @@ function platformDrawFinalActionBar(p, alpha) {
     }
   }
 
-  platformDrawFrostedGlass(
-    bar.x,
-    bar.y,
-    bar.w,
-    bar.h,
-    bar.h / 2,
-    cfg.choiceButtonColor,
-    hoverKey !== null,
-    alpha
-  );
-
   for (let key of ["home", "share", "menu"]) {
     let box = layout[key];
-    let img =
-      key === "home"
-        ? platformFinalHomeIcon
-        : key === "share"
-          ? platformFinalShareIcon
-          : platformFinalMenuIcon;
-    let iconNudgeY = key === "home" ? 1 : key === "menu" ? 2 : 0;
-    platformDrawFinalActionIcon(
-      box,
-      img,
-      alpha,
-      hoverKey === key,
-      iconNudgeY,
-      iconMax
-    );
+    if (key === "home") {
+      platformDrawFinalActionIcon(
+        box,
+        platformFinalHomeIcon,
+        alpha,
+        hoverKey === key,
+        1,
+        iconMax
+      );
+    } else if (key === "share") {
+      platformDrawFinalActionIcon(
+        box,
+        platformFinalShareIcon,
+        alpha,
+        hoverKey === key,
+        1,
+        iconMax
+      );
+    } else {
+      let eagle = platformGetIntroAnimal("eagle");
+      if (eagle) {
+        platformDrawFinalActionIntroTriangle(
+          box,
+          eagle,
+          alpha,
+          hoverKey === key,
+          2,
+          iconMax * 0.71,
+          POSTER_LAYOUT.finalActionMenuIconNudgeX
+        );
+      }
+    }
   }
 }
 
@@ -1044,6 +1089,7 @@ function platformOpenShare() {
   platformShareFrozenFrame = frameCount;
   platformSharePreviewImage = null;
   platformSharePreviewCapturePending = true;
+  platformSharePreviewStill = false;
   platformShareBoxes = p ? platformGetShareOverlayLayout(p) : null;
 }
 
@@ -1098,7 +1144,16 @@ function platformGetAnimalMenuOverlayAlpha() {
   return platformGetAnimalMenuPopoverMotion().alpha * 255;
 }
 
-function platformDrawMenuAnimalTriangle(animal, centerX, centerY, size) {
+function platformGetIntroAnimal(id) {
+  for (let animal of platformAnimals) {
+    if (animal.id === id) {
+      return animal;
+    }
+  }
+  return null;
+}
+
+function platformDrawMenuAnimalTriangle(animal, centerX, centerY, size, alpha = 255) {
   let pts = animal.pts;
   let cx0 = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
   let cy0 = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
@@ -1109,7 +1164,9 @@ function platformDrawMenuAnimalTriangle(animal, centerX, centerY, size) {
   let s = maxR > 0 ? size / maxR : 1;
 
   noStroke();
-  fill(animal.color);
+  let triColor = color(animal.color);
+  triColor.setAlpha(alpha);
+  fill(triColor);
   triangle(
     centerX + (pts[0][0] - cx0) * s,
     centerY + (pts[0][1] - cy0) * s,
@@ -1124,10 +1181,12 @@ function platformGetAnimalMenuLayout(p) {
   let entries = platformGetAnimalMenuEntries();
   let actionBar = platformGetFinalActionBarLayout(p);
   let anchor = actionBar.menu;
-  let rowH = ms(64);
+  let rowH = POSTER_LAYOUT.animalMenuRowH;
+  let rowGap = POSTER_LAYOUT.animalMenuRowGap;
   let pad = ms(12);
   let cardW = ms(148);
-  let cardH = pad * 2 + entries.length * rowH;
+  let cardH =
+    pad * 2 + entries.length * rowH + max(0, entries.length - 1) * rowGap;
   let gapAbove = ms(8);
   let cardX = anchor.x + anchor.w / 2 - cardW / 2;
   let cardY = anchor.y - cardH - gapAbove;
@@ -1142,7 +1201,7 @@ function platformGetAnimalMenuLayout(p) {
       label: entries[i].label,
       animal: entries[i].animal,
       x: cardX + pad,
-      y: cardY + pad + i * rowH,
+      y: cardY + pad + i * (rowH + rowGap),
       w: cardW - pad * 2,
       h: rowH
     });
@@ -1240,7 +1299,9 @@ function platformDrawAnimalMenuOverlay() {
 
   platformApplyGrungeFont(p.grungeFont);
   let ink = color(PLATFORM_TEXT_COLOR);
-  let triSize = ms(12);
+  let triSize = POSTER_LAYOUT.animalMenuTriSize;
+  let triSlotW = POSTER_LAYOUT.animalMenuTriSlotW;
+  let triGap = POSTER_LAYOUT.animalMenuTriGap;
   let textSizePx = ms(17);
 
   textSize(textSizePx);
@@ -1258,14 +1319,17 @@ function platformDrawAnimalMenuOverlay() {
       rect(row.x, rowY + ms(5), row.w, row.h - ms(10), ms(8));
     }
 
-    let triX = row.x + ms(14);
+    let contentNudgeX = POSTER_LAYOUT.animalMenuContentNudgeX;
+    let labelNudgeX = POSTER_LAYOUT.animalMenuLabelNudgeX;
+    let triX = row.x + triSlotW / 2 + contentNudgeX;
+    let labelX = row.x + triSlotW + triGap + contentNudgeX + labelNudgeX;
     let triY = rowY + row.h / 2;
     platformDrawMenuAnimalTriangle(row.animal, triX, triY, triSize);
 
     ink.setAlpha(hover ? 220 : 255);
     fill(ink);
     textAlign(LEFT, CENTER);
-    text(row.label, row.x + ms(30) + POSTER_LAYOUT.animalMenuLabelNudgeX, rowY + row.h / 2);
+    text(row.label, labelX, triY);
 
     if (i < layout.rows.length - 1) {
       stroke(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 22);
@@ -1467,64 +1531,110 @@ function platformShareViaFacebook(p) {
   platformShareViaNativeSheet(p, platformShareFacebookFallback);
 }
 
-function platformGetShareOverlayAlpha() {
+function platformGetShareSheetHeight() {
+  return floor(platformH * POSTER_LAYOUT.shareSheetHeightRatio);
+}
+
+function platformGetShareSheetMotion() {
   if (!platformShareOpen) {
-    return 0;
+    return { alpha: 0, offsetY: 0 };
   }
 
-  return constrain(
-    map(millis() - platformShareOpenTime, 0, PLATFORM_SHARE_FADE_MS, 0, 255),
+  let t = constrain(
+    (millis() - platformShareOpenTime) / PLATFORM_SHARE_SLIDE_MS,
     0,
-    255
+    1
   );
+  let e = platformEaseOutCubic(t);
+  let sheetH = platformGetShareSheetHeight();
+  return {
+    alpha: e,
+    offsetY: lerp(sheetH, 0, e)
+  };
+}
+
+function platformGetShareOverlayAlpha() {
+  return platformGetShareSheetMotion().alpha * 255;
+}
+
+function platformShareBoxWithMotion(box, offsetY) {
+  return {
+    x: box.x,
+    y: box.y + offsetY,
+    w: box.w,
+    h: box.h
+  };
 }
 
 function platformGetShareOverlayLayout(p) {
-  let cardW = platformW - mx(52);
-  let cardX = (platformW - cardW) / 2;
-  let cardH = cardW;
-  let cardY = (platformH - cardH) / 2 + PLATFORM_SHARE_OVERLAY_NUDGE_Y;
-
-  let pad = ms(18);
+  let sheetH = platformGetShareSheetHeight();
+  let sheetW = platformW;
+  let sheetX = 0;
+  let sheetY = platformH - sheetH;
+  let grabHitH = POSTER_LAYOUT.shareSheetGrabHitH;
+  let pad = ms(20);
+  let bottomPad = ms(24);
   let shareTouchSize = POSTER_LAYOUT.shareIconTouchSize;
-  let closeSize = PLATFORM_SHARE_CLOSE_SIZE;
+  let iconHit = shareTouchSize;
   let titleSize = platformText.finalCta.size;
   let bodySize = ms(20);
   let bodyLeading = ms(22);
-  let textX = cardX + pad;
-  let closeY = cardY + pad - ms(2);
-  let textTop = closeY + (closeSize - titleSize) / 2 + ms(9);
-  let bodyMaxW = cardW - pad * 2;
+  let bodyMaxW = sheetW - pad * 2;
+  let titleGap = ms(10);
+  let titleNudgeY = POSTER_LAYOUT.shareTitleNudgeY;
+  let bodyNudgeY = POSTER_LAYOUT.shareBodyNudgeY;
+  let previewGap = ms(12);
+  let previewInset = ms(10);
+
   if (p?.grungeFont) {
     textFont(p.grungeFont);
   }
   textSize(bodySize);
-  let bodyLineCount = platformWrapTextLines(
+  let bodyLines = platformWrapTextLines(
     platformText.share.body,
     bodyMaxW,
     1
-  ).length;
-  let titleBlockH = titleSize + ms(6);
-  let bodyBlockH = (bodyLineCount - 1) * bodyLeading + bodySize;
-  let previewY = textTop + titleBlockH + bodyBlockH + ms(10);
-  let iconHit = shareTouchSize;
-  let backH = shareTouchSize;
-  let iconsRowH = iconHit;
-  let previewInset = ms(10);
-  let previewShrinkH = ms(14);
-  let previewW = cardW - pad * 2 - previewInset * 2;
-  let previewX = cardX + pad + previewInset;
-  let previewH =
-    cardH -
-    (previewY - cardY) -
-    pad -
-    iconsRowH -
-    backH -
-    ms(16) -
-    previewShrinkH;
-  let iconsRowY = previewY + previewH + iconHit * 0.5 - 8 + ms(16);
-  let iconsY = iconsRowY + PLATFORM_SHARE_ICONS_NUDGE_Y;
-  let backY = iconsRowY + iconHit * 0.5 + ms(15) + PLATFORM_SHARE_BACK_NUDGE_Y;
+  );
+  let bodyBlockH =
+    bodyLines.length > 0 ? (bodyLines.length - 1) * bodyLeading + bodySize : 0;
+
+  let textTop = sheetY + grabHitH + ms(8) + titleNudgeY;
+  let headerBottom =
+    textTop + titleSize + titleGap + bodyNudgeY + bodyBlockH;
+  let previewH = floor(sheetH * POSTER_LAYOUT.sharePreviewHeightRatio);
+  let previewY = headerBottom + previewGap + POSTER_LAYOUT.sharePreviewBoxNudgeY;
+  let iconsRowY =
+    previewY +
+    previewH +
+    iconHit * 0.5 -
+    8 +
+    ms(16) +
+    PLATFORM_SHARE_ICONS_NUDGE_Y +
+    POSTER_LAYOUT.shareIconsRowNudgeY;
+  let sheetBottom = sheetY + sheetH - bottomPad;
+  let iconsBottom = iconsRowY + iconHit / 2;
+
+  if (iconsBottom > sheetBottom) {
+    let overflow = iconsBottom - sheetBottom;
+    previewH = max(ms(110), previewH - overflow);
+    iconsRowY =
+      previewY +
+      previewH +
+      iconHit * 0.5 -
+      8 +
+      ms(16) +
+      PLATFORM_SHARE_ICONS_NUDGE_Y +
+      POSTER_LAYOUT.shareIconsRowNudgeY;
+    iconsBottom = iconsRowY + iconHit / 2;
+    if (iconsBottom > sheetBottom) {
+      iconsRowY = sheetBottom - iconHit / 2;
+    }
+  }
+
+  let iconsY = iconsRowY;
+
+  let previewW = sheetW - pad * 2 - previewInset * 2;
+  let previewX = sheetX + pad + previewInset;
   let iconCenters = platformGetFinalActionBarIconCenters();
 
   function iconBox(cx) {
@@ -1537,13 +1647,8 @@ function platformGetShareOverlayLayout(p) {
   }
 
   return {
-    card: { x: cardX, y: cardY, w: cardW, h: cardH },
-    close: {
-      x: cardX + cardW - pad - closeSize,
-      y: closeY,
-      w: closeSize,
-      h: closeSize
-    },
+    sheet: { x: sheetX, y: sheetY, w: sheetW, h: sheetH },
+    grab: { x: sheetX, y: sheetY, w: sheetW, h: grabHitH },
     whatsapp: {
       ...iconBox(iconCenters[0]),
       accent: "#25D366",
@@ -1562,23 +1667,19 @@ function platformGetShareOverlayLayout(p) {
       kind: "facebook",
       iconR: POSTER_LAYOUT.shareIconR
     },
-    back: {
-      x: cardX + pad,
-      y: backY,
-      w: cardW - pad * 2,
-      h: backH
-    },
     iconR: ms(22),
     titleSize,
     bodySize,
     bodyLeading,
     bodyMaxW,
-    closeSize,
+    titleGap,
+    titleNudgeY,
+    bodyNudgeY,
+    bodyLineCount: bodyLines.length,
     shareTouchSize,
-    textX,
     textTop,
     preview: { x: previewX, y: previewY, w: previewW, h: previewH },
-    copiedY: backY + backH + ms(6)
+    copiedY: iconsRowY + iconHit / 2 + ms(10)
   };
 }
 
@@ -1690,6 +1791,7 @@ function platformProcessLineArtImages() {
   platformShareWhatsappLogo = platformProcessShareIcon(platformShareWhatsappLogo);
   platformShareInstagramLogo = platformProcessShareIcon(platformShareInstagramLogo);
   platformShareFacebookLogo = platformProcessShareIcon(platformShareFacebookLogo);
+  platformFinalShareIcon = platformRecolorLineArtImage(platformFinalShareIcon);
 
   for (let id in posterRegistry) {
     let imgs = posterRegistry[id].images;
@@ -1764,6 +1866,43 @@ function platformDrawShareBackdrop(shadeAlpha) {
   ctx.restore();
 }
 
+function platformDrawShareSheetBackground(sheet) {
+  let ctx = drawingContext;
+  let r = POSTER_LAYOUT.shareSheetTopRadius;
+
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.16)";
+  ctx.shadowBlur = ms(28);
+  ctx.shadowOffsetY = ms(-6);
+  ctx.shadowOffsetX = 0;
+  ctx.fillStyle = "rgba(255,255,255,1)";
+  platformRoundRectTopPath(ctx, sheet.x, sheet.y, sheet.w, sheet.h, r);
+  ctx.fill();
+  ctx.restore();
+
+  noFill();
+  stroke(228, 220, 210, 220);
+  strokeWeight(1);
+  let ctx2 = drawingContext;
+  ctx2.save();
+  platformRoundRectTopPath(ctx2, sheet.x + 0.5, sheet.y + 0.5, sheet.w - 1, sheet.h - 1, r);
+  ctx2.stroke();
+  ctx2.restore();
+  noStroke();
+}
+
+function platformDrawShareSheetGrabBar(sheet, alpha) {
+  let grabW = POSTER_LAYOUT.shareSheetGrabW;
+  let grabH = POSTER_LAYOUT.shareSheetGrabH;
+  let cx = sheet.x + sheet.w / 2;
+  let cy = sheet.y + POSTER_LAYOUT.shareSheetGrabTop + grabH / 2;
+  noStroke();
+  fill(188, 182, 174, alpha * 255);
+  rectMode(CENTER);
+  rect(cx, cy, grabW, grabH, grabH / 2);
+  rectMode(CORNER);
+}
+
 function platformDrawShareCardBackground(card) {
   let ctx = drawingContext;
   let r = ms(18);
@@ -1802,6 +1941,11 @@ function platformDrawAnimalPreviewInRect(p, rectBox) {
     return;
   }
 
+  if (platformGetShareSheetMotion().offsetY > 0.5) {
+    pop();
+    return;
+  }
+
   platformSharePreviewStill = true;
   posterDrawAnimalSharePreview(p, rectBox);
   platformSharePreviewStill = false;
@@ -1824,46 +1968,46 @@ function platformDrawShareOverlay() {
 
   let layout = platformGetShareOverlayLayout(p);
   platformShareBoxes = layout;
-  let card = layout.card;
-  let shadeAlpha = platformGetShareOverlayAlpha();
-
-  let hoverClose =
-    mouseX > layout.close.x &&
-    mouseX < layout.close.x + layout.close.w &&
-    mouseY > layout.close.y &&
-    mouseY < layout.close.y + layout.close.h;
+  let motion = platformGetShareSheetMotion();
+  let shadeAlpha = motion.alpha * 255;
+  let offsetY = motion.offsetY;
+  let sheet = platformShareBoxWithMotion(layout.sheet, offsetY);
+  let preview = platformShareBoxWithMotion(layout.preview, offsetY);
+  let textTop = layout.textTop + offsetY;
+  let copiedY = layout.copiedY + offsetY;
 
   push();
   rectMode(CORNER);
   noStroke();
   platformDrawShareBackdrop(shadeAlpha);
 
-  platformDrawShareCardBackground(card);
+  platformDrawShareSheetBackground(sheet);
+  platformDrawShareSheetGrabBar(sheet, motion.alpha);
 
   platformApplyGrungeFont(p.grungeFont);
   let ink = color(PLATFORM_TEXT_COLOR);
   fill(ink);
   noStroke();
-  textAlign(LEFT, TOP);
+  textAlign(CENTER, TOP);
   textSize(layout.titleSize);
-  text(platformText.share.title, layout.textX, layout.textTop);
+  text(platformText.share.title, sheet.x + sheet.w / 2, textTop);
 
   ink.setAlpha(210);
   fill(ink);
   textSize(layout.bodySize);
-  textLeading(layout.bodyLeading);
-  text(
+  platformDrawWrappedCenterText(
     platformText.share.body,
-    layout.textX,
-    layout.textTop + layout.titleSize + ms(6),
-    layout.bodyMaxW
+    sheet.x + sheet.w / 2,
+    textTop + layout.titleSize + layout.titleGap + layout.bodyNudgeY,
+    layout.bodyMaxW,
+    layout.bodyLeading
   );
 
-  platformDrawAnimalPreviewInRect(p, layout.preview);
+  platformDrawAnimalPreviewInRect(p, preview);
 
   let shareButtons = [layout.whatsapp, layout.instagram, layout.facebook];
   for (let i = 0; i < shareButtons.length; i++) {
-    let box = shareButtons[i];
+    let box = platformShareBoxWithMotion(shareButtons[i], offsetY);
     let hover =
       !p.touchDevice &&
       mouseX > box.x &&
@@ -1879,30 +2023,8 @@ function platformDrawShareOverlay() {
     fill(ink);
     textAlign(CENTER, TOP);
     textSize(ms(13));
-    text(platformShareCopiedMessage || platformText.share.copied, platformW / 2, layout.copiedY);
+    text(platformShareCopiedMessage || platformText.share.copied, platformW / 2, copiedY);
   }
-
-  let backHover =
-    !p.touchDevice &&
-    mouseX > layout.back.x &&
-    mouseX < layout.back.x + layout.back.w &&
-    mouseY > layout.back.y &&
-    mouseY < layout.back.y + layout.back.h;
-  ink.setAlpha(backHover ? 220 : 255);
-  fill(ink);
-  textAlign(CENTER, CENTER);
-  textSize(layout.bodySize);
-  text(
-    platformText.share.back,
-    layout.back.x + layout.back.w / 2,
-    layout.back.y + layout.back.h / 2
-  );
-
-  ink.setAlpha(hoverClose ? 220 : 140);
-  fill(ink);
-  textAlign(CENTER, CENTER);
-  textSize(layout.closeSize * 0.88);
-  text("×", layout.close.x + layout.close.w / 2, layout.close.y + layout.close.h / 2);
   pop();
 }
 
@@ -1918,32 +2040,29 @@ function platformHandleSharePress() {
     platformShareBoxes = boxes;
   }
 
-  if (platformWasBoxClicked(boxes.whatsapp)) {
+  let offsetY = platformGetShareSheetMotion().offsetY;
+
+  if (platformWasBoxClicked(platformShareBoxWithMotion(boxes.whatsapp, offsetY))) {
     platformShareViaWhatsApp(p);
     return;
   }
 
-  if (platformWasBoxClicked(boxes.instagram)) {
+  if (platformWasBoxClicked(platformShareBoxWithMotion(boxes.instagram, offsetY))) {
     platformShareViaInstagram(p);
     return;
   }
 
-  if (platformWasBoxClicked(boxes.facebook)) {
+  if (platformWasBoxClicked(platformShareBoxWithMotion(boxes.facebook, offsetY))) {
     platformShareViaFacebook(p);
     return;
   }
 
-  if (platformWasBoxClicked(boxes.close)) {
+  if (platformWasBoxClicked(platformShareBoxWithMotion(boxes.grab, offsetY))) {
     platformCloseShare();
     return;
   }
 
-  if (platformWasBoxClicked(boxes.back)) {
-    platformReturnToIntro();
-    return;
-  }
-
-  if (!platformWasBoxClicked(boxes.card)) {
+  if (!platformWasBoxClicked(platformShareBoxWithMotion(boxes.sheet, offsetY))) {
     platformCloseShare();
   }
 }
@@ -6540,14 +6659,14 @@ function platformGetChoiceImageVisualOffset(img) {
 }
 
 const platformChoiceImageTweaks = {
-  plasticBag: { maxSizeScale: 1.05 },
-  fabricBag: { maxSizeScale: 1.05 },
+  plasticBag: { maxSizeScale: 0.92 },
+  fabricBag: { maxSizeScale: 0.92 },
   plasticBottle: { maxSizeScale: 1.05 },
   reusableBottle: { maxSizeScale: 1.05 },
   garbageBin: { maxSizeScale: 1 },
   sandwichPlastic: { maxSizeScale: 1 },
-  glassCup: { maxSizeScale: 1 },
-  plasticCup: { maxSizeScale: 1 },
+  glassCup: { maxSizeScale: 0.9 },
+  plasticCup: { maxSizeScale: 0.9 },
   plasticFork: { maxSizeScale: 0.98 },
   reusableFork: { maxSizeScale: 0.98 }
 };
@@ -7020,7 +7139,7 @@ const POSTER_LAYOUT = {
   finalMessageNudgeY: -60,
   finalPosterNudgeY: ms(90),
   feedbackNudgeY: -25,
-  choiceW: ms(200),
+  choiceW: ms(168),
   choiceBtnH: ms(108),
   choiceH: ms(162),
   choiceLabelGap: ms(18),
@@ -7046,13 +7165,32 @@ const POSTER_LAYOUT = {
   finalActionBarH: ms(68),
   finalActionBarPadX: ms(18),
   finalActionIconScale: 0.58,
-  animalMenuLabelNudgeX: ms(6),
+  finalActionMenuIconNudgeX: 2,
+  animalMenuRowH: ms(72),
+  animalMenuRowGap: ms(8),
+  animalMenuTriSize: ms(15),
+  animalMenuTriSlotW: ms(30),
+  animalMenuTriGap: ms(8),
+  animalMenuContentNudgeX: 7,
+  animalMenuLabelNudgeX: 1,
   shareIconR: ms(26),
   shareInstagramIconR: ms(24),
   shareIconSizeBonus: ms(2),
   shareInstagramIconBonusPx: 1,
   shareIconThicken: 2,
   shareIconTouchSize: ms(52),
+  shareSheetHeightRatio: 0.65,
+  shareSheetTopRadius: ms(32),
+  shareSheetGrabW: ms(58),
+  shareSheetGrabH: ms(5),
+  shareSheetGrabTop: ms(10),
+  shareSheetGrabHitH: ms(34),
+  sharePreviewHeightRatio: 0.36,
+  shareTitleNudgeY: ms(12),
+  shareBodyNudgeY: ms(18),
+  sharePreviewBoxNudgeY: -ms(24),
+  sharePreviewAnimalNudgeY: -70,
+  shareIconsRowNudgeY: ms(6),
   frameStrokeWeight: 0.9,
   questionPhaseNudgeY: -10,
   progressGapBelowQuestion: ms(21),
