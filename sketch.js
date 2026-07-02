@@ -6,6 +6,7 @@
 let platformMode = "intro"; // intro | turtle | eagle | deer | toad | hyena
 let platformMeshGrainGfx = null;
 let platformSelectedStarted = false;
+let platformSessionAnimalId = null;
 let platformIntroHover = -1;
 let platformCanvasReady = false;
 let platformIntroTransitionActive = false;
@@ -23,11 +24,27 @@ let platformShareOpenTime = 0;
 let platformShareCopiedUntil = 0;
 let platformShareCopiedMessage = "";
 let platformShareBoxes = null;
-let platformSharePreviewImage = null;
-let platformSharePreviewCapturePending = false;
+let platformSharePointerDown = false;
+let platformSharePointerStartX = 0;
+let platformSharePointerStartY = 0;
+let platformShareDragEligible = false;
+let platformShareDragActive = false;
+let platformShareDragOffsetY = 0;
+let platformShareDragSnapStart = null;
+let platformShareDragSnapFrom = 0;
+let platformShareDragSnapTarget = 0;
+let platformShareDragClosing = false;
 let platformSharePreviewStill = false;
 let platformShareFrozenFrame = 0;
+const PLATFORM_SHARE_PREVIEW_STILL_FRAME = 0;
+const PLATFORM_SHARE_PREVIEW_CACHE_VER = 6;
+const platformSharePreviewStillCache = new Map();
+
+function platformSharePreviewCacheKey(id) {
+  return id + "|v" + PLATFORM_SHARE_PREVIEW_CACHE_VER;
+}
 const PLATFORM_SHARE_SLIDE_MS = 340;
+const PLATFORM_SHARE_DRAG_SNAP_MS = 220;
 let platformShareWhatsappLogo = null;
 let platformShareInstagramLogo = null;
 let platformShareFacebookLogo = null;
@@ -46,6 +63,7 @@ function platformShareAnimFrame() {
 
 let platformLoadingTargetAnimal = null;
 let platformLoadingStartTime = null;
+let platformHasCompletedAnyPoster = false;
 const PLATFORM_LOADING_HOLD_MS = 450;
 const PLATFORM_LOADING_MORPH_MS = 280;
 const PLATFORM_LOADING_TOTAL_MS = 5000;
@@ -165,6 +183,12 @@ const PLATFORM_MESH_ACCENT = [210, 170, 128];
 const PLATFORM_TEXT_COLOR = "#4E4138";
 const PLATFORM_TEXT_RGB = [78, 65, 56];
 const PLATFORM_UI_ICON_V = 5;
+const PLATFORM_SHARE_LOGO_V = 2;
+const PLATFORM_SHARE_LOGO_CONTENT_FRAC = {
+  whatsapp: { w: 382 / 840, h: 382 / 859 },
+  instagram: { w: 430 / 850, h: 430 / 530 },
+  facebook: { w: 696 / 736, h: 694 / 736 }
+};
 const PLATFORM_SHARE_PUBLIC_URL = "https://dafnaperez.github.io/Interactive2026/";
 
 const PLATFORM_SHARE_ANIMAL_PHRASE = {
@@ -390,39 +414,91 @@ function posterDrawAnimalMobile(p) {
 function platformGetSharePreviewTuning(animalId) {
   switch (animalId) {
     case "eagle":
-      return { scale: 0.60, screenX: 0, screenY: -30, refX: -6, refY: -18 };
+      return {
+        scale: 0.54,
+        screenX: 0,
+        screenY: -12,
+        refX: -6,
+        refY: -18,
+        shareExtraDown: 10,
+        shareAnimalNudgeY: -ms(15)
+      };
     case "turtle":
-      return { scale: 0.68, screenX: 0, screenY: -50, refX: 0, refY: 0 };
+      return {
+        scale: 0.62,
+        screenX: 0,
+        screenY: -12,
+        refX: 0,
+        refY: 0,
+        shareExtraDown: 8
+      };
     case "deer":
-      return { scale: 0.54, screenX: 18, screenY: -52, refX: -102, refY: 8 };
+      return {
+        scale: 0.52,
+        screenX: 18,
+        screenY: -28,
+        refX: -102,
+        refY: 8,
+        shareExtraDown: 28,
+        shareAnimalNudgeY: -ms(15)
+      };
     case "toad":
-      return { scale: 0.64, screenX: 0, screenY: -45, refX: 0, refY: 0 };
+      return {
+        scale: 0.60,
+        screenX: 0,
+        screenY: -18,
+        refX: 0,
+        refY: 0,
+        shareExtraDown: 6,
+        shareAnimalNudgeY: -ms(15)
+      };
     case "hyena":
-      return { scale: 0.68, screenX: 0, screenY: -50, refX: -14, refY: 8 };
+      return {
+        scale: 0.64,
+        screenX: 0,
+        screenY: -24,
+        refX: -14,
+        refY: 8,
+        shareExtraDown: 26,
+        shareAnimalNudgeY: -ms(15)
+      };
     default:
-      return { scale: 0.68, screenX: 0, screenY: 0, refX: 0, refY: 0 };
+      return { scale: 0.64, screenX: 0, screenY: 0, refX: 0, refY: 0 };
   }
 }
 
 function posterDrawAnimalSharePreview(p, rectBox) {
   push();
   let screenScale = rectBox.w / platformW;
-  let tuning = platformGetSharePreviewTuning(platformMode);
+  let tuning = platformGetSharePreviewTuning(p.id);
   let animalScale = (platformW / ANIMAL_REF_W) * screenScale * tuning.scale;
   let previewNudgeY = POSTER_LAYOUT.sharePreviewAnimalNudgeY;
+  let extraDown = tuning.shareExtraDown || 0;
+  let animalNudgeY = tuning.shareAnimalNudgeY || 0;
   translate(
     rectBox.x + rectBox.w / 2 + tuning.screenX,
     rectBox.y +
       rectBox.h / 2 +
       ANIMAL_SCREEN_OFFSET_Y * screenScale +
       tuning.screenY +
-      previewNudgeY
+      previewNudgeY +
+      animalNudgeY +
+      extraDown
   );
   scale(animalScale);
   translate(
     -ANIMAL_REF_W / 2 + tuning.refX,
     -ANIMAL_ANCHOR_Y + tuning.refY
   );
+
+  if (platformSharePreviewStill) {
+    platformTriangleDrawPass = 1;
+    p.cfg.drawAnimal();
+    platformTriangleDrawPass = 0;
+    platformSuppressAnimalPieceDraw = false;
+    pop();
+    return;
+  }
 
   platformTriangleDrawPass = 0;
   p.cfg.drawAnimal();
@@ -551,9 +627,9 @@ const platformAnimals = [
 
 function preload() {
   posterPreloadAll();
-  platformShareWhatsappLogo = loadImage("whatsapp_logo.png");
-  platformShareInstagramLogo = loadImage("instagram_logo.png");
-  platformShareFacebookLogo = loadImage("facebook_logo.png");
+  platformShareWhatsappLogo = loadImage(`whatsapp_logo.png?v=${PLATFORM_SHARE_LOGO_V}`);
+  platformShareInstagramLogo = loadImage(`instagram_logo.png?v=${PLATFORM_SHARE_LOGO_V}`);
+  platformShareFacebookLogo = loadImage(`facebook_logo.png?v=${PLATFORM_SHARE_LOGO_V}`);
   platformFinalHomeIcon = loadImage(`home.png?v=${PLATFORM_UI_ICON_V}`);
   platformFinalShareIcon = loadImage(`share.png?v=${PLATFORM_UI_ICON_V}`);
   platformFinalMenuIcon = loadImage(`menu.png?v=${PLATFORM_UI_ICON_V}`);
@@ -575,6 +651,7 @@ function platformApplyStartupQuery() {
   if (animal && posterRegistry[animal]) {
     platformMode = animal;
     platformSelectedStarted = false;
+    platformSessionAnimalId = null;
     platformIntroTransitionActive = false;
     platformIntroTransitionIndex = -1;
     platformIntroTransitionSnapshot = null;
@@ -614,6 +691,9 @@ function draw() {
   platformInvokeAnimal("draw");
   platformDrawPosterFadeOverlay();
   if (platformShareOpen) {
+    platformUpdateShareDragMotion();
+  }
+  if (platformShareOpen) {
     platformDrawShareOverlay();
   }
   if (platformAnimalMenuOpen) {
@@ -632,7 +712,7 @@ function mousePressed() {
   }
 
   if (platformShareOpen) {
-    platformHandleSharePress();
+    platformHandleSharePointerDown(mouseX, mouseY);
     return;
   }
 
@@ -664,7 +744,7 @@ function touchStarted() {
   }
 
   if (platformShareOpen) {
-    platformHandleSharePress();
+    platformHandleSharePointerDown(mouseX, mouseY);
     return false;
   }
 
@@ -683,6 +763,34 @@ function touchStarted() {
   }
 
   return platformInvokeAnimal("touchStarted") ?? false;
+}
+
+function mouseDragged() {
+  if (platformShareOpen && platformSharePointerDown) {
+    platformHandleSharePointerMove(mouseX, mouseY);
+  }
+}
+
+function mouseReleased() {
+  if (platformShareOpen && platformSharePointerDown) {
+    platformHandleSharePointerUp(mouseX, mouseY);
+  }
+}
+
+function touchMoved() {
+  if (platformShareOpen && platformSharePointerDown) {
+    platformHandleSharePointerMove(mouseX, mouseY);
+    return false;
+  }
+  return false;
+}
+
+function touchEnded() {
+  if (platformShareOpen && platformSharePointerDown) {
+    platformHandleSharePointerUp(mouseX, mouseY);
+    return false;
+  }
+  return false;
 }
 
 function windowResized() {
@@ -743,6 +851,16 @@ function platformGetTripleIconCentersInBar(barX, barW, padX) {
     barX + padX + slotW * 1.5,
     barX + padX + slotW * 2.5
   ];
+}
+
+function platformGetShareSheetIconCenters() {
+  let barW = POSTER_LAYOUT.shareSheetIconsBarW;
+  let barX = (platformW - barW) / 2;
+  return platformGetTripleIconCentersInBar(
+    barX,
+    barW,
+    POSTER_LAYOUT.shareSheetIconsPadX
+  );
 }
 
 function platformGetFinalActionBarIconCenters() {
@@ -1006,6 +1124,7 @@ function platformDrawFinalActionBar(p, alpha) {
   let layout = platformGetFinalActionBarLayout(p);
   p.finalActionBoxes = layout;
   let bar = layout.bar;
+  let iconNudgeY = POSTER_LAYOUT.finalActionIconNudgeY;
   let iconMax = bar.h * POSTER_LAYOUT.finalActionIconScale;
   let hoverKey = null;
 
@@ -1030,7 +1149,7 @@ function platformDrawFinalActionBar(p, alpha) {
         platformFinalHomeIcon,
         alpha,
         hoverKey === key,
-        1,
+        iconNudgeY,
         iconMax
       );
     } else if (key === "share") {
@@ -1039,7 +1158,7 @@ function platformDrawFinalActionBar(p, alpha) {
         platformFinalShareIcon,
         alpha,
         hoverKey === key,
-        1,
+        iconNudgeY,
         iconMax
       );
     } else {
@@ -1050,8 +1169,8 @@ function platformDrawFinalActionBar(p, alpha) {
           eagle,
           alpha,
           hoverKey === key,
-          2,
-          iconMax * 0.71,
+          iconNudgeY,
+          iconMax * 0.70,
           POSTER_LAYOUT.finalActionMenuIconNudgeX
         );
       }
@@ -1079,17 +1198,102 @@ function platformHandleFinalActionPress() {
   }
 }
 
+function platformGetSharePreviewCaptureSpec() {
+  let sheetH = floor(platformH * POSTER_LAYOUT.shareSheetHeightRatio);
+  let previewH = floor(sheetH * POSTER_LAYOUT.sharePreviewHeightRatio);
+  let pad = ms(20);
+  let previewInset = ms(10);
+  let previewW = platformW - pad * 2 - previewInset * 2;
+  return {
+    w: max(1, floor(previewW)),
+    h: max(1, previewH)
+  };
+}
+
+function platformBakeSharePreviewStill(p) {
+  if (!p || !platformCanBakeSharePreviewStill(p)) {
+    return null;
+  }
+
+  let id = p.id;
+  let cacheKey = platformSharePreviewCacheKey(id);
+  if (platformSharePreviewStillCache.has(cacheKey)) {
+    return platformSharePreviewStillCache.get(cacheKey);
+  }
+
+  let spec = platformGetSharePreviewCaptureSpec();
+  let bakeBox = { x: 0, y: 0, w: spec.w, h: spec.h };
+  let saved = get(0, 0, spec.w, spec.h);
+
+  push();
+  noStroke();
+  fill(255);
+  rect(0, 0, spec.w, spec.h);
+
+  let prevStill = platformSharePreviewStill;
+  let prevFrame = platformShareFrozenFrame;
+  let prevMotion = p.finalMotion;
+  let savedTGroup = p.tGroup.slice();
+  platformSharePreviewStill = true;
+  platformShareFrozenFrame = PLATFORM_SHARE_PREVIEW_STILL_FRAME;
+  p.finalMotion = 1;
+  p.tGroup = [1, 1, 1, 1];
+
+  posterDrawAnimalSharePreview(p, bakeBox);
+
+  platformSharePreviewStill = prevStill;
+  platformShareFrozenFrame = prevFrame;
+  p.finalMotion = prevMotion;
+  p.tGroup = savedTGroup;
+
+  let img = get(0, 0, spec.w, spec.h);
+  image(saved, 0, 0);
+  pop();
+
+  platformSharePreviewStillCache.set(cacheKey, img);
+  return img;
+}
+
+function platformCanBakeSharePreviewStill(p) {
+  if (!p || p.clickCount < p.cfg.finalClickCount) {
+    return false;
+  }
+  if (p.cfg.isFullyAssembled) {
+    return p.cfg.isFullyAssembled(p);
+  }
+  return (
+    p.tGroup[0] > 0.96 &&
+    p.tGroup[1] > 0.96 &&
+    p.tGroup[2] > 0.96 &&
+    p.tGroup[3] > 0.96
+  );
+}
+
+function platformTryBakeSharePreviewStill(p) {
+  if (!p || platformShareOpen) {
+    return;
+  }
+  if (!platformCanBakeSharePreviewStill(p)) {
+    return;
+  }
+  let cacheKey = platformSharePreviewCacheKey(p.id);
+  if (platformSharePreviewStillCache.has(cacheKey)) {
+    return;
+  }
+  platformBakeSharePreviewStill(p);
+}
+
 function platformOpenShare() {
   platformCloseAnimalMenu();
+  platformResetShareDragState();
   let p = posterRegistry[platformMode];
   platformShareOpen = true;
   platformShareOpenTime = millis();
   platformShareCopiedUntil = 0;
   platformShareCopiedMessage = "";
-  platformShareFrozenFrame = frameCount;
-  platformSharePreviewImage = null;
-  platformSharePreviewCapturePending = true;
-  platformSharePreviewStill = false;
+  if (p) {
+    platformBakeSharePreviewStill(p);
+  }
   platformShareBoxes = p ? platformGetShareOverlayLayout(p) : null;
 }
 
@@ -1098,9 +1302,19 @@ function platformCloseShare() {
   platformShareCopiedUntil = 0;
   platformShareCopiedMessage = "";
   platformShareBoxes = null;
-  platformSharePreviewImage = null;
-  platformSharePreviewCapturePending = false;
   platformSharePreviewStill = false;
+  platformResetShareDragState();
+}
+
+function platformResetShareDragState() {
+  platformSharePointerDown = false;
+  platformShareDragEligible = false;
+  platformShareDragActive = false;
+  platformShareDragOffsetY = 0;
+  platformShareDragSnapStart = null;
+  platformShareDragSnapFrom = 0;
+  platformShareDragSnapTarget = 0;
+  platformShareDragClosing = false;
 }
 
 function platformFormatAnimalMenuLabel(animalId) {
@@ -1235,7 +1449,7 @@ function platformSwitchToAnimal(animalId) {
   }
   platformCloseAnimalMenu();
   platformCloseShare();
-  platformStartLoadingForAnimal(animalId);
+  platformEnterAnimal(animalId);
 }
 
 function platformDrawAnimalMenuBackdrop(shadeAlpha) {
@@ -1540,17 +1754,143 @@ function platformGetShareSheetMotion() {
     return { alpha: 0, offsetY: 0 };
   }
 
+  let sheetH = platformGetShareSheetHeight();
   let t = constrain(
     (millis() - platformShareOpenTime) / PLATFORM_SHARE_SLIDE_MS,
     0,
     1
   );
   let e = platformEaseOutCubic(t);
-  let sheetH = platformGetShareSheetHeight();
+  let openOffsetY = lerp(sheetH, 0, e);
+  let dragOffsetY = platformShareDragOffsetY;
+  let dragFade =
+    dragOffsetY > 0
+      ? constrain(1 - dragOffsetY / (sheetH * 0.55), 0.25, 1)
+      : 1;
+
   return {
-    alpha: e,
-    offsetY: lerp(sheetH, 0, e)
+    alpha: e * dragFade,
+    offsetY: openOffsetY + dragOffsetY
   };
+}
+
+function platformUpdateShareDragMotion() {
+  if (platformShareDragSnapStart === null) {
+    return;
+  }
+
+  let duration = platformShareDragClosing
+    ? PLATFORM_SHARE_SLIDE_MS
+    : PLATFORM_SHARE_DRAG_SNAP_MS;
+  let t = constrain((millis() - platformShareDragSnapStart) / duration, 0, 1);
+  let eased = platformShareDragClosing ? pow(t, 3) : platformEaseOutCubic(t);
+  platformShareDragOffsetY = lerp(
+    platformShareDragSnapFrom,
+    platformShareDragSnapTarget,
+    eased
+  );
+
+  if (t >= 1) {
+    platformShareDragOffsetY = platformShareDragSnapTarget;
+    platformShareDragSnapStart = null;
+    if (platformShareDragClosing) {
+      platformCloseShare();
+    }
+    platformShareDragClosing = false;
+  }
+}
+
+function platformGetShareDragDismissThreshold() {
+  return max(ms(72), platformGetShareSheetHeight() * 0.18);
+}
+
+function platformEnsureShareOverlayBoxes() {
+  let p = posterRegistry[platformMode];
+  if (!p) {
+    return null;
+  }
+
+  if (!platformShareBoxes) {
+    platformShareBoxes = platformGetShareOverlayLayout(p);
+  }
+
+  return platformShareBoxes;
+}
+
+function platformHandleSharePointerDown(x, y) {
+  if (!platformShareOpen) {
+    return;
+  }
+
+  let boxes = platformEnsureShareOverlayBoxes();
+  if (!boxes) {
+    return;
+  }
+
+  platformSharePointerDown = true;
+  platformSharePointerStartX = x;
+  platformSharePointerStartY = y;
+  platformShareDragSnapStart = null;
+  platformShareDragClosing = false;
+
+  let offsetY = platformGetShareSheetMotion().offsetY;
+  let grabBox = platformShareBoxWithMotion(boxes.grab, offsetY);
+  platformShareDragEligible = platformPointInBox(x, y, grabBox);
+}
+
+function platformHandleSharePointerMove(x, y) {
+  if (!platformSharePointerDown || !platformShareDragEligible) {
+    return;
+  }
+
+  let dy = y - platformSharePointerStartY;
+  if (!platformShareDragActive && dy > ms(6)) {
+    platformShareDragActive = true;
+  }
+
+  if (platformShareDragActive) {
+    platformShareDragOffsetY = max(0, dy);
+    platformShareDragSnapStart = null;
+  }
+}
+
+function platformFinishShareDrag() {
+  let sheetH = platformGetShareSheetHeight();
+  let threshold = platformGetShareDragDismissThreshold();
+
+  if (platformShareDragOffsetY >= threshold) {
+    platformShareDragSnapFrom = platformShareDragOffsetY;
+    platformShareDragSnapTarget = sheetH;
+    platformShareDragClosing = true;
+  } else {
+    platformShareDragSnapFrom = platformShareDragOffsetY;
+    platformShareDragSnapTarget = 0;
+    platformShareDragClosing = false;
+  }
+
+  platformShareDragSnapStart = millis();
+  platformShareDragActive = false;
+  platformShareDragEligible = false;
+}
+
+function platformHandleSharePointerUp(x, y) {
+  if (!platformSharePointerDown) {
+    return;
+  }
+
+  if (platformShareDragActive) {
+    platformFinishShareDrag();
+    platformSharePointerDown = false;
+    return;
+  }
+
+  let moved = dist(x, y, platformSharePointerStartX, platformSharePointerStartY);
+  platformSharePointerDown = false;
+  platformShareDragEligible = false;
+
+  if (moved < ms(10)) {
+    platformHandleShareTap();
+  }
 }
 
 function platformGetShareOverlayAlpha() {
@@ -1570,10 +1910,9 @@ function platformGetShareOverlayLayout(p) {
   let sheetH = platformGetShareSheetHeight();
   let sheetW = platformW;
   let sheetX = 0;
-  let sheetY = platformH - sheetH;
+  let sheetY = platformH - sheetH + POSTER_LAYOUT.shareSheetNudgeY;
   let grabHitH = POSTER_LAYOUT.shareSheetGrabHitH;
   let pad = ms(20);
-  let bottomPad = ms(24);
   let shareTouchSize = POSTER_LAYOUT.shareIconTouchSize;
   let iconHit = shareTouchSize;
   let titleSize = platformText.finalCta.size;
@@ -1583,6 +1922,7 @@ function platformGetShareOverlayLayout(p) {
   let titleGap = ms(10);
   let titleNudgeY = POSTER_LAYOUT.shareTitleNudgeY;
   let bodyNudgeY = POSTER_LAYOUT.shareBodyNudgeY;
+  let contentNudgeY = POSTER_LAYOUT.shareSheetContentNudgeY;
   let previewGap = ms(12);
   let previewInset = ms(10);
 
@@ -1598,44 +1938,19 @@ function platformGetShareOverlayLayout(p) {
   let bodyBlockH =
     bodyLines.length > 0 ? (bodyLines.length - 1) * bodyLeading + bodySize : 0;
 
-  let textTop = sheetY + grabHitH + ms(8) + titleNudgeY;
+  let textTop = sheetY + grabHitH + ms(8) + titleNudgeY + contentNudgeY;
   let headerBottom =
     textTop + titleSize + titleGap + bodyNudgeY + bodyBlockH;
-  let previewH = floor(sheetH * POSTER_LAYOUT.sharePreviewHeightRatio);
   let previewY = headerBottom + previewGap + POSTER_LAYOUT.sharePreviewBoxNudgeY;
-  let iconsRowY =
-    previewY +
-    previewH +
-    iconHit * 0.5 -
-    8 +
-    ms(16) +
-    PLATFORM_SHARE_ICONS_NUDGE_Y +
-    POSTER_LAYOUT.shareIconsRowNudgeY;
-  let sheetBottom = sheetY + sheetH - bottomPad;
-  let iconsBottom = iconsRowY + iconHit / 2;
-
-  if (iconsBottom > sheetBottom) {
-    let overflow = iconsBottom - sheetBottom;
-    previewH = max(ms(110), previewH - overflow);
-    iconsRowY =
-      previewY +
-      previewH +
-      iconHit * 0.5 -
-      8 +
-      ms(16) +
-      PLATFORM_SHARE_ICONS_NUDGE_Y +
-      POSTER_LAYOUT.shareIconsRowNudgeY;
-    iconsBottom = iconsRowY + iconHit / 2;
-    if (iconsBottom > sheetBottom) {
-      iconsRowY = sheetBottom - iconHit / 2;
-    }
-  }
-
+  let previewH = floor(sheetH * POSTER_LAYOUT.sharePreviewHeightRatio);
+  let iconsGap = POSTER_LAYOUT.shareIconsGapBelowPreview;
+  let previewBottom = previewY + previewH;
+  let iconsRowY = previewBottom + iconsGap + iconHit / 2;
   let iconsY = iconsRowY;
 
   let previewW = sheetW - pad * 2 - previewInset * 2;
   let previewX = sheetX + pad + previewInset;
-  let iconCenters = platformGetFinalActionBarIconCenters();
+  let iconCenters = platformGetShareSheetIconCenters();
 
   function iconBox(cx) {
     return {
@@ -1653,21 +1968,21 @@ function platformGetShareOverlayLayout(p) {
       ...iconBox(iconCenters[0]),
       accent: "#25D366",
       kind: "whatsapp",
-      iconR: POSTER_LAYOUT.shareIconR
+      iconR: POSTER_LAYOUT.shareSheetIconR
     },
     instagram: {
       ...iconBox(iconCenters[1]),
       accent: "#C13584",
       kind: "instagram",
-      iconR: POSTER_LAYOUT.shareInstagramIconR
+      iconR: POSTER_LAYOUT.shareSheetIconR
     },
     facebook: {
       ...iconBox(iconCenters[2]),
       accent: "#1877F2",
       kind: "facebook",
-      iconR: POSTER_LAYOUT.shareIconR
+      iconR: POSTER_LAYOUT.shareSheetIconR
     },
-    iconR: ms(22),
+    iconR: POSTER_LAYOUT.shareSheetIconR,
     titleSize,
     bodySize,
     bodyLeading,
@@ -1788,9 +2103,6 @@ function platformProcessShareIcon(img) {
 }
 
 function platformProcessLineArtImages() {
-  platformShareWhatsappLogo = platformProcessShareIcon(platformShareWhatsappLogo);
-  platformShareInstagramLogo = platformProcessShareIcon(platformShareInstagramLogo);
-  platformShareFacebookLogo = platformProcessShareIcon(platformShareFacebookLogo);
   platformFinalShareIcon = platformRecolorLineArtImage(platformFinalShareIcon);
 
   for (let id in posterRegistry) {
@@ -1818,31 +2130,88 @@ function platformGetShareLogo(kind) {
   }
 }
 
+function platformGetShareIconDrawSize(drawR) {
+  return (
+    drawR * 2 +
+    POSTER_LAYOUT.shareIconSizeBonus +
+    POSTER_LAYOUT.shareSheetIconDrawPad
+  );
+}
+
+function platformGetShareIconDrawDimensions(img, kind, drawR) {
+  let drawSize = platformGetShareIconDrawSize(drawR);
+  let fbFrac = PLATFORM_SHARE_LOGO_CONTENT_FRAC.facebook;
+  let frac = PLATFORM_SHARE_LOGO_CONTENT_FRAC[kind] || fbFrac;
+  let targetVisual = drawSize * fbFrac.h;
+  let aspect = img.width / max(img.height, 1);
+  let drawH = targetVisual / frac.h;
+  let drawW = drawH * aspect;
+  return { drawW, drawH };
+}
+
 function platformDrawShareOptionButton(box, alpha, hover, iconR) {
   let img = platformGetShareLogo(box.kind);
-  if (!img || img.width <= 0) {
+  if (!img || img.width <= 0 || img.height <= 0) {
     return;
   }
 
-  let drawR = box.iconR ?? iconR;
-  let drawSize =
-    drawR * 2 +
-    POSTER_LAYOUT.shareIconSizeBonus +
-    (box.kind === "instagram" ? POSTER_LAYOUT.shareInstagramIconBonusPx : 0);
-
-  push();
-  let s = hover ? 1.04 : 1;
   let cx = box.x + box.w / 2;
   let cy = box.y + box.h / 2;
-  translate(cx, cy);
-  scale(s);
+  let drawR = box.iconR ?? iconR;
+  let dims = platformGetShareIconDrawDimensions(img, box.kind, drawR);
+  let s = hover ? 1.05 : 1;
+
+  push();
+  imageMode(CENTER);
   drawingContext.imageSmoothingEnabled = true;
   drawingContext.imageSmoothingQuality = "high";
-  imageMode(CENTER);
+  tint(255, alpha);
+  image(img, cx, cy, dims.drawW * s, dims.drawH * s);
   noTint();
-  image(img, 0, 0, drawSize, drawSize);
   pop();
   imageMode(CORNER);
+}
+
+function platformSyncShareIconBoxes(layout, previewRect) {
+  let iconHit = layout.shareTouchSize;
+  let iconCenters = platformGetShareSheetIconCenters();
+  let iconsRowY =
+    previewRect.y +
+    previewRect.h +
+    POSTER_LAYOUT.shareIconsGapBelowPreview +
+    iconHit / 2;
+
+  function iconBox(cx, kind, accent, iconR) {
+    return {
+      x: cx - iconHit / 2,
+      y: iconsRowY - iconHit / 2,
+      w: iconHit,
+      h: iconHit,
+      kind,
+      accent,
+      iconR
+    };
+  }
+
+  layout.whatsapp = iconBox(
+    iconCenters[0],
+    "whatsapp",
+    "#25D366",
+    POSTER_LAYOUT.shareSheetIconR
+  );
+  layout.instagram = iconBox(
+    iconCenters[1],
+    "instagram",
+    "#C13584",
+    POSTER_LAYOUT.shareSheetIconR
+  );
+  layout.facebook = iconBox(
+    iconCenters[2],
+    "facebook",
+    "#1877F2",
+    POSTER_LAYOUT.shareSheetIconR
+  );
+  layout.copiedY = iconsRowY + iconHit / 2 + ms(10);
 }
 
 function platformDrawShareBackdrop(shadeAlpha) {
@@ -1853,15 +2222,14 @@ function platformDrawShareBackdrop(shadeAlpha) {
   let snap = get(0, 0, platformW, platformH);
   let ctx = drawingContext;
   ctx.save();
-  // Clip to canvas so blurred edges never spill outside
   ctx.beginPath();
   ctx.rect(0, 0, platformW, platformH);
   ctx.clip();
   ctx.filter = `blur(${PLATFORM_SHARE_BACKDROP_BLUR_PX}px)`;
   ctx.drawImage(snap.canvas, 0, 0, platformW, platformH);
   ctx.filter = "none";
-  let a = (shadeAlpha / 255) * PLATFORM_SHARE_BACKDROP_DARKEN;
-  ctx.fillStyle = `rgba(${PLATFORM_TEXT_RGB[0]},${PLATFORM_TEXT_RGB[1]},${PLATFORM_TEXT_RGB[2]},${a})`;
+  let shade = (shadeAlpha / 255) * PLATFORM_SHARE_BACKDROP_DARKEN;
+  ctx.fillStyle = `rgba(${PLATFORM_TEXT_RGB[0]},${PLATFORM_TEXT_RGB[1]},${PLATFORM_TEXT_RGB[2]},${shade})`;
   ctx.fillRect(0, 0, platformW, platformH);
   ctx.restore();
 }
@@ -1871,10 +2239,6 @@ function platformDrawShareSheetBackground(sheet) {
   let r = POSTER_LAYOUT.shareSheetTopRadius;
 
   ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.16)";
-  ctx.shadowBlur = ms(28);
-  ctx.shadowOffsetY = ms(-6);
-  ctx.shadowOffsetX = 0;
   ctx.fillStyle = "rgba(255,255,255,1)";
   platformRoundRectTopPath(ctx, sheet.x, sheet.y, sheet.w, sheet.h, r);
   ctx.fill();
@@ -1895,7 +2259,12 @@ function platformDrawShareSheetGrabBar(sheet, alpha) {
   let grabW = POSTER_LAYOUT.shareSheetGrabW;
   let grabH = POSTER_LAYOUT.shareSheetGrabH;
   let cx = sheet.x + sheet.w / 2;
-  let cy = sheet.y + POSTER_LAYOUT.shareSheetGrabTop + grabH / 2;
+  let cy =
+    sheet.y +
+    POSTER_LAYOUT.shareSheetGrabTop +
+    grabH / 2 +
+    POSTER_LAYOUT.shareSheetGrabNudgeY +
+    POSTER_LAYOUT.shareSheetContentNudgeY;
   noStroke();
   fill(188, 182, 174, alpha * 255);
   rectMode(CENTER);
@@ -1926,37 +2295,21 @@ function platformDrawShareCardBackground(card) {
 }
 
 function platformDrawAnimalPreviewInRect(p, rectBox) {
+  let still = platformBakeSharePreviewStill(p);
+  if (!still) {
+    return;
+  }
+
   push();
+  let ctx = drawingContext;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rectBox.x, rectBox.y, rectBox.w, rectBox.h);
+  ctx.clip();
   imageMode(CORNER);
   noTint();
-
-  if (platformSharePreviewImage) {
-    image(platformSharePreviewImage, rectBox.x, rectBox.y, rectBox.w, rectBox.h);
-    pop();
-    return;
-  }
-
-  if (!platformSharePreviewCapturePending) {
-    pop();
-    return;
-  }
-
-  if (platformGetShareSheetMotion().offsetY > 0.5) {
-    pop();
-    return;
-  }
-
-  platformSharePreviewStill = true;
-  posterDrawAnimalSharePreview(p, rectBox);
-  platformSharePreviewStill = false;
-
-  let px = floor(rectBox.x);
-  let py = floor(rectBox.y);
-  let pw = floor(rectBox.w);
-  let ph = floor(rectBox.h);
-  platformSharePreviewImage = get(px, py, pw, ph);
-  platformSharePreviewCapturePending = false;
-  image(platformSharePreviewImage, rectBox.x, rectBox.y, rectBox.w, rectBox.h);
+  image(still, rectBox.x, rectBox.y, rectBox.w, rectBox.h);
+  ctx.restore();
   pop();
 }
 
@@ -2004,10 +2357,12 @@ function platformDrawShareOverlay() {
   );
 
   platformDrawAnimalPreviewInRect(p, preview);
+  platformSyncShareIconBoxes(layout, preview);
+  platformShareBoxes = layout;
 
   let shareButtons = [layout.whatsapp, layout.instagram, layout.facebook];
   for (let i = 0; i < shareButtons.length; i++) {
-    let box = platformShareBoxWithMotion(shareButtons[i], offsetY);
+    let box = shareButtons[i];
     let hover =
       !p.touchDevice &&
       mouseX > box.x &&
@@ -2028,31 +2383,29 @@ function platformDrawShareOverlay() {
   pop();
 }
 
-function platformHandleSharePress() {
+function platformHandleShareTap() {
   let p = posterRegistry[platformMode];
-  let boxes = platformShareBoxes;
-  if (!p) {
+  let boxes = platformEnsureShareOverlayBoxes();
+  if (!p || !boxes) {
     return;
   }
 
-  if (!boxes) {
-    boxes = platformGetShareOverlayLayout(p);
-    platformShareBoxes = boxes;
-  }
-
   let offsetY = platformGetShareSheetMotion().offsetY;
+  let preview = platformShareBoxWithMotion(boxes.preview, offsetY);
+  platformSyncShareIconBoxes(boxes, preview);
+  platformShareBoxes = boxes;
 
-  if (platformWasBoxClicked(platformShareBoxWithMotion(boxes.whatsapp, offsetY))) {
+  if (platformWasBoxClicked(boxes.whatsapp)) {
     platformShareViaWhatsApp(p);
     return;
   }
 
-  if (platformWasBoxClicked(platformShareBoxWithMotion(boxes.instagram, offsetY))) {
+  if (platformWasBoxClicked(boxes.instagram)) {
     platformShareViaInstagram(p);
     return;
   }
 
-  if (platformWasBoxClicked(platformShareBoxWithMotion(boxes.facebook, offsetY))) {
+  if (platformWasBoxClicked(boxes.facebook)) {
     platformShareViaFacebook(p);
     return;
   }
@@ -2072,6 +2425,7 @@ function platformReturnToIntro() {
   platformCloseAnimalMenu();
   platformMode = "intro";
   platformSelectedStarted = false;
+  platformSessionAnimalId = null;
   platformIntroTransitionActive = false;
   platformIntroTransitionIndex = -1;
   platformIntroTransitionSnapshot = null;
@@ -2084,10 +2438,19 @@ function platformReturnToIntro() {
 }
 
 function platformEnsureAnimalStarted() {
-  if (platformSelectedStarted) return;
+  if (platformMode === "intro" || platformMode === "loading") {
+    return;
+  }
+  if (!posterRegistry[platformMode]) {
+    return;
+  }
 
-  platformSelectedStarted = true;
-  platformInvokeAnimal("setup");
+  if (platformSessionAnimalId === platformMode && platformSelectedStarted) {
+    posterEnsurePlayReady(posterRegistry[platformMode]);
+    return;
+  }
+
+  posterPrepareForPlay(platformMode);
 }
 function platformRotatePoint(px, py, cx, cy, ang) {
   let dx = px - cx;
@@ -2404,7 +2767,7 @@ function platformDrawIntro() {
       platformPosterFadeColor = animal.color;
       platformPosterFadeDuration = 420;
       platformPosterFadeStartTime = millis();
-      platformStartLoadingForAnimal(animal.id);
+      platformEnterAnimal(animal.id);
     }
   }
 }
@@ -2514,21 +2877,94 @@ function platformDrawLoadingTriangle(morph) {
   );
 }
 
+function posterRefreshChoiceBoxes(p) {
+  let boxes = platformCreateChoiceBoxes(
+    POSTER_LAYOUT.choiceW,
+    POSTER_LAYOUT.choiceH,
+    POSTER_LAYOUT.choiceY,
+    POSTER_LAYOUT.choiceCenterPull
+  );
+  p.leftBox = boxes.left;
+  p.rightBox = boxes.right;
+}
+
+function posterEnsurePlayReady(p) {
+  let cfg = p.cfg;
+  if (
+    !p.leftBox ||
+    !p.rightBox ||
+    p.pieceOffsets.length !== cfg.totalPieces
+  ) {
+    posterSetup(p.id);
+  }
+}
+
+function posterPrepareForPlay(animalId) {
+  if (!animalId || !posterRegistry[animalId]) {
+    return false;
+  }
+
+  platformSharePreviewStill = false;
+  posterReset(posterRegistry[animalId]);
+  posterSetup(animalId);
+  platformSessionAnimalId = animalId;
+  platformSelectedStarted = true;
+  platformSharePreviewStillCache.delete(platformSharePreviewCacheKey(animalId));
+  return true;
+}
+
+function platformStartAnimalSession(animalId) {
+  if (!animalId || !posterRegistry[animalId]) {
+    return;
+  }
+
+  platformMode = animalId;
+  platformLoadingTargetAnimal = null;
+  platformLoadingStartTime = null;
+  platformCloseShare();
+  platformClearSharedPosterCaches();
+  if (!posterPrepareForPlay(animalId)) {
+    return;
+  }
+
+  let p = posterRegistry[animalId];
+  p.disassembleBoost = 320;
+  p.finalMotion = 0;
+  platformPosterFadeColor = PLATFORM_BG_COLOR;
+  platformPosterFadeDuration = 850;
+  platformPosterFadeStartTime = millis();
+}
+
+function platformBeginAnimalDirect(animalId) {
+  if (!animalId || !posterRegistry[animalId]) {
+    platformReturnToIntro();
+    return;
+  }
+  platformCloseShare();
+  platformCloseAnimalMenu();
+  platformStartAnimalSession(animalId);
+}
+
+function platformEnterAnimal(animalId) {
+  if (!animalId || !posterRegistry[animalId]) {
+    return;
+  }
+  platformCloseShare();
+  platformCloseAnimalMenu();
+  if (platformHasCompletedAnyPoster) {
+    platformBeginAnimalDirect(animalId);
+  } else {
+    platformStartLoadingForAnimal(animalId);
+  }
+}
+
 function platformBeginAnimalFromLoading() {
   let animalId = platformLoadingTargetAnimal;
   if (!animalId || !posterRegistry[animalId]) {
     platformReturnToIntro();
     return;
   }
-
-  platformMode = animalId;
-  platformSelectedStarted = false;
-  platformLoadingTargetAnimal = null;
-  platformLoadingStartTime = null;
-  posterReset(posterRegistry[animalId]);
-  platformPosterFadeColor = PLATFORM_BG_COLOR;
-  platformPosterFadeDuration = 850;
-  platformPosterFadeStartTime = millis();
+  platformStartAnimalSession(animalId);
 }
 
 function platformDrawLoading() {
@@ -6338,16 +6774,17 @@ function platformApplyLoosePieceTransform(p, index, t) {
     : 1 - platformSmoothStep(0.05, 0.92, t);
   let rotNearBody =
     profile.dampenWobbleNearBody !== false ? wobbleDampen : 1;
+  let animFrame = platformSharePreviewStill ? platformShareFrozenFrame : frameCount;
   let spaceRot =
-    (off.rot + sin(frameCount * 0.004 + off.phase) * 0.16 * wobbleDampen) *
+    (off.rot + sin(animFrame * 0.004 + off.phase) * 0.16 * wobbleDampen) *
     rotNearBody;
   let softFloatX =
-    sin(frameCount * off.speedX + off.phase + index * 1.7) *
+    sin(animFrame * off.speedX + off.phase + index * 1.7) *
     profile.floatAmp *
     wobble *
     wobbleDampen;
   let softFloatY =
-    cos(frameCount * off.speedY + off.phase + index * 1.3) *
+    cos(animFrame * off.speedY + off.phase + index * 1.3) *
     profile.floatAmp *
     wobble *
     wobbleDampen;
@@ -6582,6 +7019,15 @@ function platformGetFinalRevealAlpha(clickCount, finalClickCount, startTime, int
     map(finalElapsed, introDuration, introDuration + fadeDuration, 0, 255),
     0,
     255
+  );
+}
+
+function platformPointInBox(x, y, box) {
+  return (
+    x > box.x &&
+    x < box.x + box.w &&
+    y > box.y &&
+    y < box.y + box.h
   );
 }
 
@@ -7161,10 +7607,11 @@ const POSTER_LAYOUT = {
   finalBodyLeading: ms(24),
   finalBodyLineCount: 7,
   finalCtaGap: ms(26),
-  finalActionBarW: ms(285),
+  finalActionBarW: ms(305),
   finalActionBarH: ms(68),
-  finalActionBarPadX: ms(18),
-  finalActionIconScale: 0.58,
+  finalActionBarPadX: ms(14),
+  finalActionIconScale: 0.70,
+  finalActionIconNudgeY: ms(4),
   finalActionMenuIconNudgeX: 2,
   animalMenuRowH: ms(72),
   animalMenuRowGap: ms(8),
@@ -7180,17 +7627,24 @@ const POSTER_LAYOUT = {
   shareIconThicken: 2,
   shareIconTouchSize: ms(52),
   shareSheetHeightRatio: 0.65,
-  shareSheetTopRadius: ms(32),
+  shareSheetNudgeY: 30,
+  shareSheetTopRadius: ms(40),
   shareSheetGrabW: ms(58),
   shareSheetGrabH: ms(5),
   shareSheetGrabTop: ms(10),
+  shareSheetGrabNudgeY: 2,
+  shareSheetContentNudgeY: 5,
   shareSheetGrabHitH: ms(34),
-  sharePreviewHeightRatio: 0.36,
+  sharePreviewHeightRatio: 0.38,
   shareTitleNudgeY: ms(12),
-  shareBodyNudgeY: ms(18),
-  sharePreviewBoxNudgeY: -ms(24),
-  sharePreviewAnimalNudgeY: -70,
-  shareIconsRowNudgeY: ms(6),
+  shareBodyNudgeY: ms(8),
+  sharePreviewBoxNudgeY: 0,
+  sharePreviewAnimalNudgeY: -ms(68),
+  shareIconsGapBelowPreview: ms(18),
+  shareSheetIconsBarW: ms(340),
+  shareSheetIconsPadX: ms(10),
+  shareSheetIconR: ms(34),
+  shareSheetIconDrawPad: ms(8),
   frameStrokeWeight: 0.9,
   questionPhaseNudgeY: -10,
   progressGapBelowQuestion: ms(21),
@@ -7872,6 +8326,11 @@ function platformPosterTGroupTarget(p, groupIndex) {
 }
 
 function platformLerpPosterTGroup(p, groupIndex, normalRate) {
+  if (platformSharePreviewStill) {
+    p.tGroup[groupIndex] = 1;
+    return;
+  }
+
   let rate = normalRate;
 
   if (p.disassembleBoost > 0) {
@@ -7976,6 +8435,9 @@ function posterReset(p) {
   p.progressFillActive = false;
   p.progressFillT = 0;
   p.progressFillIndex = -1;
+  p.pieceOffsets = [];
+  p.leftBox = null;
+  p.rightBox = null;
 }
 
 function posterResetAll() {
@@ -8022,14 +8484,7 @@ function posterSetup(id) {
   let cfg = p.cfg;
   platformApplyCanvasSize();
   platformApplyGrungeFont(p.grungeFont);
-  let boxes = platformCreateChoiceBoxes(
-    POSTER_LAYOUT.choiceW,
-    POSTER_LAYOUT.choiceH,
-    POSTER_LAYOUT.choiceY,
-    POSTER_LAYOUT.choiceCenterPull
-  );
-  p.leftBox = boxes.left;
-  p.rightBox = boxes.right;
+  posterRefreshChoiceBoxes(p);
   randomSeed(cfg.randomSeed);
   p.looseRepelSmooth = null;
   p.looseWobbleDampen = null;
@@ -8219,7 +8674,7 @@ function posterDrawQuestionUI(p) {
 
   // Choices — left and right each fall independently
   let stages = cfg.choiceStages || platformChoiceStages;
-  if (p.clickCount < stages.length) {
+  if (p.clickCount < stages.length && p.leftBox && p.rightBox) {
     let stage = stages[p.clickCount];
 
     let fL = wrongFallGetElemTransform(p, "choiceL");
@@ -8411,6 +8866,7 @@ function posterTickWrongAnimation(p) {
 function posterDraw(id) {
   let p = posterRegistry[id];
   let cfg = p.cfg;
+  posterEnsurePlayReady(p);
   posterTickWrongAnimation(p);
   platformTickProgressFill(p);
   platformLooseBeginRepelFrame(p);
@@ -8429,6 +8885,9 @@ function posterDraw(id) {
     else if (step === "frame") posterDrawFrame(p);
   }
   platformUpdateFeedbackTimers(id);
+  if (p.clickCount >= cfg.finalClickCount) {
+    platformTryBakeSharePreviewStill(p);
+  }
 }
 
 function posterHandleChoicePress(id) {
@@ -8469,8 +8928,11 @@ function posterHandleChoicePress(id) {
     if (cfg.resetFinalOnCorrect && stage < cfg.finalClickCount - 1) {
       p.finalStart = null;
     }
-    if (p.clickCount >= cfg.finalClickCount && !cfg.requiresFullAssemblyForFinal) {
-      p.finalStart = millis();
+    if (p.clickCount >= cfg.finalClickCount) {
+      platformHasCompletedAnyPoster = true;
+      if (!cfg.requiresFullAssemblyForFinal) {
+        p.finalStart = millis();
+      }
     }
     platformTriggerCorrectFeedback(id);
   } else if (clickedWrong) {
@@ -8513,6 +8975,10 @@ function posterTouchStarted(id) {
 
 function posterWindowResized(id) {
   platformApplyViewportLayout();
+  let p = posterRegistry[id];
+  if (p) {
+    posterRefreshChoiceBoxes(p);
+  }
 }
 
 const platformAnimalHandlers = {
@@ -8581,8 +9047,9 @@ function drawTurtleAnimal() {
 
   p.finalMotion = lerp(p.finalMotion, finalAlive ? 1 : 0, 0.035);
 
-  let swim = frameCount * 0.045;
-  let movement = p.finalMotion;
+  let animFrame = platformShareAnimFrame();
+  let swim = animFrame * 0.045;
+  let movement = platformSharePreviewStill ? 0 : p.finalMotion;
   let turtleTurtleX = ANIMAL_REF_W / 2 - 5;
   let turtleTurtleY = 400;
   let turtleTurtleScale = p.cfg.loosePiece.drawTransform.scale;
@@ -8837,13 +9304,18 @@ function drawEagleAnimal() {
   vultureScale = 0.69;
   vultureRot = 0;
   // Keep loose scatter pieces stable during assembly — perch motion only when fully built.
-  floatIntensity = eagleFullyAssembled ? 1 - p.finalMotion : 0;
+  floatIntensity = platformSharePreviewStill
+    ? 0
+    : eagleFullyAssembled
+      ? 1 - p.finalMotion
+      : 0;
 
   translate(vultureX, vultureY);
 
-  let floatY = sin(frameCount * 0.02) * 10 * floatIntensity;
-  let floatX = cos(frameCount * 0.015) * 7 * floatIntensity;
-  let bodyTilt = sin(frameCount * 0.01) * 0.035 * floatIntensity;
+  let animFrame = platformShareAnimFrame();
+  let floatY = sin(animFrame * 0.02) * 10 * floatIntensity;
+  let floatX = cos(animFrame * 0.015) * 7 * floatIntensity;
+  let bodyTilt = sin(animFrame * 0.01) * 0.035 * floatIntensity;
 
   translate(floatX, floatY);
   rotate(vultureRot + bodyTilt);
@@ -8895,7 +9367,7 @@ function drawEagleAnimal() {
   };
 
   if (finalAlive) {
-    let life = p.finalMotion;
+    let life = platformSharePreviewStill ? 0 : p.finalMotion;
 
     const headTiltKeys = [
       "beakTip", "beakTop", "beakMid", "beakBot", "headTop", "headBack", "faceFront",
@@ -8910,32 +9382,32 @@ function drawEagleAnimal() {
     ];
 
     // 3 — Body hover: hip joint + vertical lift (legs fixed)
-    let hoverPhase = sin(frameCount * 0.022 + 1.1) * life;
+    let hoverPhase = sin(animFrame * 0.022 + 1.1) * life;
     platformRotatePointKeys(pts, hoverKeys, pts.legTop, hoverPhase * 0.1);
     for (let i = 0; i < hoverKeys.length; i++) {
       pts[hoverKeys[i]] = platformMovePoint(pts[hoverKeys[i]], 0, hoverPhase * 20);
     }
 
     // 1 — Head tilt: neck joint
-    let headTiltAng = sin(frameCount * 0.03) * 0.09 * life;
+    let headTiltAng = sin(animFrame * 0.03) * 0.09 * life;
     platformRotatePointKeys(pts, headTiltKeys, pts.neckBaseFront, headTiltAng);
 
     // 2 — Wings: shoulder joint, extend up then slowly return
-    let wingPhase = (frameCount * 0.0072 + 0.25) % 1;
+    let wingPhase = (animFrame * 0.0072 + 0.25) % 1;
     let wingExtend = platformEagleWingExtendPhase(wingPhase) * life;
     platformRotatePointKeys(pts, wingKeys, pts.shoulder, -wingExtend * 0.24 * life);
   } else {
     // subtle folded-paper movement while pieces are still assembling
-    let headFold = map(sin(frameCount * 0.008), -1, 1, 0.92, 1.04);
+    let headFold = map(sin(animFrame * 0.008), -1, 1, 0.92, 1.04);
     pts.beakTip = platformFoldPoint(pts.beakTip, pts.headTop, pts.throat, headFold);
     pts.beakTop = platformFoldPoint(pts.beakTop, pts.headTop, pts.throat, headFold);
     pts.beakBot = platformFoldPoint(pts.beakBot, pts.headTop, pts.throat, headFold);
 
-    let wingFoldMove = map(sin(frameCount * 0.012), -1, 1, 0.86, 1.14);
+    let wingFoldMove = map(sin(animFrame * 0.012), -1, 1, 0.86, 1.14);
     pts.wingTip = platformFoldPoint(pts.wingTip, pts.backTop, pts.bodyLow, wingFoldMove);
     pts.tailTip = platformFoldPoint(pts.tailTip, pts.backEnd, pts.bellyBack, wingFoldMove);
 
-    let legFold = map(sin(frameCount * 0.018 + 0.4), -1, 1, 0.94, 1.08);
+    let legFold = map(sin(animFrame * 0.018 + 0.4), -1, 1, 0.94, 1.08);
     pts.ankle = platformFoldPoint(pts.ankle, pts.legTop, pts.knee, legFold);
     pts.footBack = platformFoldPoint(pts.footBack, pts.knee, pts.ankle, legFold);
     pts.toe2 = platformFoldPoint(pts.toe2, pts.knee, pts.ankle, legFold);
@@ -9089,7 +9561,7 @@ function drawDeerAnimal() {
   let movement = platformSharePreviewStill ? 0 : p.finalMotion;
 
   // Main rhythm. Adjust only this number if you want it slower/faster.
-  let gait = platformSharePreviewStill ? 0 : frameCount * 0.052;
+  let gait = platformSharePreviewStill ? 0 : platformShareAnimFrame() * 0.052;
 
   // Smooth bounding energy. This creates a continuous rise/fall, not a hard jump.
   let bound = (1 - cos(gait)) / 2;
@@ -10056,8 +10528,8 @@ function drawHyenaAnimal() {
 
   p.finalMotion = lerp(p.finalMotion, hyenaIsFullyAssembled ? 1 : 0, 0.035);
 
-  let movement = p.finalMotion;
-  let gait = frameCount * 0.043;
+  let movement = platformSharePreviewStill ? 0 : p.finalMotion;
+  let gait = platformSharePreviewStill ? 0 : platformShareAnimFrame() * 0.043;
   let bodyX = sin(gait * 0.50) * 8.5 * movement;
   let bodyY = abs(sin(gait * 1.0)) * 5.0 * movement;
   let bodyTilt = sin(gait * 0.72) * 0.022 * movement;
