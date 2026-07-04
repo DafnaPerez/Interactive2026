@@ -18,6 +18,7 @@ let platformIntroTransitionSnapshot = null;
 let platformPosterFadeStartTime = null;
 let platformPosterFadeDuration = 320;
 let platformPosterFadeColor = null;
+let platformSkipNextSessionFade = false;
 
 let platformShareOpen = false;
 let platformShareOpenTime = 0;
@@ -55,7 +56,20 @@ let platformAnimalMenuOpen = false;
 let platformAnimalMenuOpenTime = 0;
 let platformAnimalMenuBoxes = null;
 const PLATFORM_ANIMAL_MENU_FADE_MS = 260;
-let platformLineArtRecolorCache = new WeakMap();
+let platformLineArtRecolorCache = new Map();
+
+function platformLineArtSourceKey(img) {
+  if (!img.__lineArtSourceKey) {
+    img.__lineArtSourceKey =
+      (img.src || "inline") + "@" + img.width + "x" + img.height;
+  }
+  return img.__lineArtSourceKey;
+}
+
+function platformHexToRgb(hex) {
+  let c = color(hex);
+  return [red(c), green(c), blue(c)];
+}
 
 function platformShareAnimFrame() {
   return platformSharePreviewStill ? platformShareFrozenFrame : frameCount;
@@ -80,6 +94,7 @@ let platformScreenScaleX = 1;
 let platformScreenScaleY = 1;
 let platformDebugLayoutSig = "";
 let platformLastLayoutTighten = 1;
+let platformActivePosterQuestionNudgeY = 0;
 
 function platformDebugLogLayout(runId) {
   let vp = platformGetViewportSize();
@@ -180,9 +195,9 @@ const PLATFORM_BG_COLOR = "#F4EBDD";
 // Mesh bg — clean blush wisp + warm caramel accent on pure white.
 const PLATFORM_MESH_WISP = [252, 236, 220];
 const PLATFORM_MESH_ACCENT = [210, 170, 128];
-const PLATFORM_TEXT_COLOR = "#4E4138";
-const PLATFORM_TEXT_RGB = [78, 65, 56];
-const PLATFORM_UI_ICON_V = 5;
+const PLATFORM_TEXT_COLOR = "#4E463D";
+const PLATFORM_TEXT_RGB = [78, 70, 61];
+const PLATFORM_UI_ICON_V = 8;
 const PLATFORM_SHARE_LOGO_V = 2;
 const PLATFORM_SHARE_LOGO_CONTENT_FRAC = {
   whatsapp: { w: 382 / 840, h: 382 / 859 },
@@ -394,7 +409,10 @@ function posterDrawAnimalMobile(p) {
   let s = platformW / ANIMAL_REF_W;
   translate(
     platformW / 2 + shake.x,
-    platformLayoutY(ANIMAL_ANCHOR_Y) + ms(ANIMAL_SCREEN_OFFSET_Y) + shake.y
+    platformLayoutY(ANIMAL_ANCHOR_Y) +
+      ms(ANIMAL_SCREEN_OFFSET_Y) +
+      posterGetBelowHeaderNudgeY() +
+      shake.y
   );
   rotate(shake.rot);
   scale(s);
@@ -679,6 +697,9 @@ function setup() {
 function draw() {
   if (platformMode === "intro") {
     platformDrawIntro();
+    if (platformMode !== "intro" && platformMode !== "loading") {
+      platformDrawPosterHandoffFrame();
+    }
     return;
   }
 
@@ -877,7 +898,10 @@ function platformGetFinalActionBarLayout(p) {
   let barW = POSTER_LAYOUT.finalActionBarW;
   let barH = POSTER_LAYOUT.finalActionBarH;
   let barX = (platformW - barW) / 2;
-  let barY = platformGetFinalContentBottom(p) + POSTER_LAYOUT.finalCtaGap;
+  let barY =
+    platformGetFinalContentBottom(p) +
+    POSTER_LAYOUT.finalCtaGap -
+    (barH - POSTER_LAYOUT.finalActionBarRefH) / 2;
   let padX = POSTER_LAYOUT.finalActionBarPadX;
   let slotW = (barW - padX * 2) / 3;
 
@@ -925,6 +949,27 @@ function platformRoundRectTopPath(ctx, x, y, w, h, radius) {
   ctx.closePath();
 }
 
+function platformClipCircle(ctx, cx, cy, radius) {
+  ctx.beginPath();
+  ctx.arc(cx, cy, max(0.5, radius), 0, Math.PI * 2);
+  ctx.closePath();
+}
+
+const CHOICE_BUTTON_SCALE = 0.7;
+const CHOICE_IMAGE_SCALE = 0.9025;
+
+function platformApplyChoiceLayoutMetrics() {
+  POSTER_LAYOUT.choiceBtnSize = ms(210) * CHOICE_BUTTON_SCALE;
+  POSTER_LAYOUT.choiceW = POSTER_LAYOUT.choiceBtnSize;
+  POSTER_LAYOUT.choiceBtnH = POSTER_LAYOUT.choiceBtnSize;
+  POSTER_LAYOUT.choiceImageSize =
+    ms(132) * CHOICE_BUTTON_SCALE * CHOICE_IMAGE_SCALE;
+  POSTER_LAYOUT.choiceH =
+    POSTER_LAYOUT.choiceBtnSize +
+    POSTER_LAYOUT.choiceLabelGap +
+    ms(50);
+}
+
 function platformDrawLiquidGlassButton(
   bx,
   by,
@@ -938,76 +983,184 @@ function platformDrawLiquidGlassButton(
   platformDrawFrostedGlass(bx, by, w, h, cornerR, accentColor, hover, alpha);
 }
 
-// Elevated 3D glass card — neutral warm-white body, soft gloss, gentle depth.
+function platformFillLiquidGlassInterior(
+  ctx,
+  bx,
+  by,
+  bw,
+  bh,
+  cx,
+  cy,
+  r,
+  hover,
+  a,
+  stretchX = 1
+) {
+  let innerShadow = ctx.createLinearGradient(
+    cx - r * 0.75,
+    cy - r * 0.75,
+    cx + r * 0.5,
+    cy + r * 0.5
+  );
+  innerShadow.addColorStop(0, `rgba(158, 150, 140, ${(hover ? 0.13 : 0.1) * a})`);
+  innerShadow.addColorStop(0.3, `rgba(188, 182, 174, ${(hover ? 0.045 : 0.03) * a})`);
+  innerShadow.addColorStop(0.55, "rgba(255, 255, 255, 0)");
+  ctx.fillStyle = innerShadow;
+  ctx.fillRect(bx, by, bw, bh);
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(stretchX, 1);
+  let localW = bw / stretchX;
+
+  let edgeShade = ctx.createRadialGradient(
+    r * 0.15,
+    r * 0.22,
+    r * 0.45,
+    0,
+    0,
+    r
+  );
+  edgeShade.addColorStop(0.72, "rgba(255, 255, 255, 0)");
+  edgeShade.addColorStop(0.9, `rgba(148, 140, 130, ${(hover ? 0.07 : 0.05) * a})`);
+  edgeShade.addColorStop(1, `rgba(132, 124, 114, ${(hover ? 0.11 : 0.08) * a})`);
+  ctx.fillStyle = edgeShade;
+  ctx.fillRect(-localW / 2 - 2, -bh / 2 - 2, localW + 4, bh + 4);
+  ctx.restore();
+
+  let spec = ctx.createRadialGradient(
+    cx - r * 0.36,
+    cy - r * 0.4,
+    r * 0.03,
+    cx - r * 0.1,
+    cy - r * 0.1,
+    r * 0.9
+  );
+  spec.addColorStop(0, `rgba(255, 255, 255, ${(hover ? 0.5 : 0.38) * a})`);
+  spec.addColorStop(0.32, `rgba(255, 255, 255, ${0.06 * a})`);
+  spec.addColorStop(1, "rgba(255, 255, 255, 0)");
+  ctx.fillStyle = spec;
+  ctx.fillRect(bx, by, bw, bh);
+}
+
+// Figma ref: Button - Liquid Glass - Symbol, 126×126 circle (ms(210) at 390w).
 function platformDrawChoiceButton(bx, by, bw, bh, cornerR, hover = false, alpha = 255) {
   let ctx = drawingContext;
-  let r = min(cornerR, bw / 2, bh / 2);
   let a = alpha / 255;
-  let yB = by + bh;
+  let size = min(bw, bh);
+  let cx = bx + size / 2 + (bw - size) / 2;
+  let cy = by + size / 2 + (bh - size) / 2;
+  let r = size / 2;
 
   ctx.save();
-  platformRoundRectPath(ctx, bx, by, bw, bh, r);
-  ctx.shadowColor = `rgba(68, 62, 56, ${(hover ? 0.2 : 0.16) * a})`;
-  ctx.shadowBlur = ms(hover ? 34 : 26);
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = ms(hover ? 13 : 9);
-  ctx.fillStyle = `rgba(255, 254, 252, ${a})`;
-  ctx.fill();
-  ctx.restore();
-
-  ctx.save();
-  platformRoundRectPath(ctx, bx, by, bw, bh, r);
-  ctx.shadowColor = `rgba(58, 54, 48, ${(hover ? 0.17 : 0.13) * a})`;
-  ctx.shadowBlur = ms(hover ? 8 : 6);
+  platformClipCircle(ctx, cx, cy, r);
+  ctx.shadowColor = `rgba(132, 124, 114, ${(hover ? 0.11 : 0.08) * a})`;
+  ctx.shadowBlur = ms(hover ? 22 : 18);
   ctx.shadowOffsetX = 0;
   ctx.shadowOffsetY = ms(hover ? 4 : 3);
-  ctx.fillStyle = `rgba(255, 254, 252, ${a})`;
+  ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
   ctx.fill();
   ctx.restore();
 
   ctx.save();
-  platformRoundRectPath(ctx, bx, by, bw, bh, r);
+  platformClipCircle(ctx, cx, cy, r - 0.5);
   ctx.clip();
 
-  let body = ctx.createLinearGradient(bx, by, bx, yB);
-  body.addColorStop(0, `rgba(255, 254, 252, ${a})`);
-  body.addColorStop(1, `rgba(249, 246, 242, ${a})`);
-  ctx.fillStyle = body;
+  platformFillLiquidGlassInterior(ctx, bx, by, bw, bh, cx, cy, r, hover, a, 1);
+  ctx.restore();
+
+  ctx.save();
+  platformClipCircle(ctx, cx, cy, r - ms(0.45));
+  let rim = ctx.createLinearGradient(cx - r, cy - r, cx + r * 0.22, cy + r);
+  rim.addColorStop(0, `rgba(255, 255, 255, ${(hover ? 0.7 : 0.6) * a})`);
+  rim.addColorStop(0.32, `rgba(244, 240, 234, ${0.1 * a})`);
+  rim.addColorStop(0.68, `rgba(255, 255, 255, ${0.02 * a})`);
+  rim.addColorStop(1, `rgba(148, 140, 130, ${(hover ? 0.16 : 0.12) * a})`);
+  ctx.strokeStyle = rim;
+  ctx.lineWidth = ms(0.85);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function platformDrawLiquidGlassPill(bx, by, bw, bh, hover = false, alpha = 255) {
+  let ctx = drawingContext;
+  let a = alpha / 255;
+  let r = bh / 2;
+
+  ctx.save();
+  platformRoundRectPath(ctx, bx, by, bw, bh, r);
+  ctx.shadowColor = `rgba(132, 124, 114, ${(hover ? 0.14 : 0.11) * a})`;
+  ctx.shadowBlur = ms(hover ? 24 : 20);
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = ms(hover ? 5 : 4);
+  ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  platformRoundRectPath(ctx, bx + 0.5, by + 0.5, bw - 1, bh - 1, r - 0.5);
+  ctx.clip();
+
+  let innerShadow = ctx.createLinearGradient(
+    bx,
+    by,
+    bx + bw * 0.42,
+    by + bh * 0.72
+  );
+  innerShadow.addColorStop(0, `rgba(158, 150, 140, ${(hover ? 0.12 : 0.095) * a})`);
+  innerShadow.addColorStop(0.42, `rgba(210, 204, 196, ${(hover ? 0.05 : 0.035) * a})`);
+  innerShadow.addColorStop(1, "rgba(255, 255, 255, 0)");
+  ctx.fillStyle = innerShadow;
   ctx.fillRect(bx, by, bw, bh);
 
-  let sheen = ctx.createLinearGradient(bx, by, bx, by + bh * 0.52);
-  sheen.addColorStop(0, `rgba(255, 254, 250, ${(hover ? 0.76 : 0.64) * a})`);
-  sheen.addColorStop(1, `rgba(255, 254, 250, 0)`);
-  ctx.fillStyle = sheen;
+  let edgeCx = bx + bw / 2;
+  let edgeCy = by + bh / 2;
+  let edgeShade = ctx.createRadialGradient(
+    edgeCx - r * 0.08,
+    edgeCy - r * 0.12,
+    r * 0.2,
+    edgeCx,
+    edgeCy,
+    max(bw, bh) * 0.52
+  );
+  edgeShade.addColorStop(0.7, "rgba(255, 255, 255, 0)");
+  edgeShade.addColorStop(0.9, `rgba(148, 140, 130, ${(hover ? 0.055 : 0.042) * a})`);
+  edgeShade.addColorStop(1, `rgba(132, 124, 114, ${(hover ? 0.085 : 0.065) * a})`);
+  ctx.fillStyle = edgeShade;
   ctx.fillRect(bx, by, bw, bh);
 
-  let shadeCx = bx + bw * 0.58;
-  let shadeCy = yB - bh * 0.08;
-  let shadeR = bw * 0.7;
-  let shade = ctx.createRadialGradient(shadeCx, shadeCy, 0, shadeCx, shadeCy, shadeR);
-  shade.addColorStop(0, `rgba(98, 90, 82, ${(hover ? 0.12 : 0.09) * a})`);
-  shade.addColorStop(0.48, `rgba(112, 104, 96, ${0.035 * a})`);
-  shade.addColorStop(1, `rgba(126, 118, 110, 0)`);
-  ctx.fillStyle = shade;
+  let topSheen = ctx.createLinearGradient(bx, by, bx, by + bh * 0.52);
+  topSheen.addColorStop(0, `rgba(255, 255, 255, ${(hover ? 0.48 : 0.4) * a})`);
+  topSheen.addColorStop(0.38, `rgba(255, 255, 255, ${0.08 * a})`);
+  topSheen.addColorStop(1, "rgba(255, 255, 255, 0)");
+  ctx.fillStyle = topSheen;
+  ctx.fillRect(bx, by, bw, bh);
+
+  let bottomShade = ctx.createLinearGradient(bx, by + bh * 0.42, bx, by + bh);
+  bottomShade.addColorStop(0, "rgba(255, 255, 255, 0)");
+  bottomShade.addColorStop(0.7, `rgba(188, 182, 174, ${(hover ? 0.052 : 0.038) * a})`);
+  bottomShade.addColorStop(1, `rgba(132, 124, 114, ${(hover ? 0.13 : 0.1) * a})`);
+  ctx.fillStyle = bottomShade;
   ctx.fillRect(bx, by, bw, bh);
   ctx.restore();
 
   ctx.save();
+  let rimInset = ms(0.45);
   platformRoundRectPath(
     ctx,
-    bx + 0.6,
-    by + 0.6,
-    bw - 1.2,
-    bh - 1.2,
-    max(1, r - 0.6)
+    bx + rimInset,
+    by + rimInset,
+    bw - rimInset * 2,
+    bh - rimInset * 2,
+    r - rimInset
   );
-  let rim = ctx.createLinearGradient(bx, by, bx, yB);
-  rim.addColorStop(0, `rgba(255, 254, 250, ${0.9 * a})`);
-  rim.addColorStop(0.55, `rgba(255, 254, 250, ${0.06 * a})`);
-  rim.addColorStop(1, `rgba(136, 126, 116, ${0.17 * a})`);
+  let rim = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+  rim.addColorStop(0, `rgba(255, 255, 255, ${(hover ? 0.82 : 0.72) * a})`);
+  rim.addColorStop(0.32, `rgba(244, 240, 234, ${0.15 * a})`);
+  rim.addColorStop(0.68, `rgba(255, 255, 255, ${0.04 * a})`);
+  rim.addColorStop(1, `rgba(148, 140, 130, ${(hover ? 0.22 : 0.18) * a})`);
   ctx.strokeStyle = rim;
-  ctx.lineWidth = ms(1);
-  ctx.lineJoin = "round";
+  ctx.lineWidth = ms(0.85);
   ctx.stroke();
   ctx.restore();
 }
@@ -1116,7 +1269,7 @@ function platformDrawFinalActionIntroTriangle(
   push();
   translate(box.x + box.w / 2 + iconNudgeX, box.y + box.h / 2 + iconNudgeY);
   scale(hover ? 1.05 : 1);
-  platformDrawMenuAnimalTriangle(animal, 0, 0, size, alpha);
+  platformDrawMenuAnimalTriangle(animal, 0, 0, size, alpha, PLATFORM_TEXT_COLOR);
   pop();
 }
 
@@ -1125,7 +1278,8 @@ function platformDrawFinalActionBar(p, alpha) {
   p.finalActionBoxes = layout;
   let bar = layout.bar;
   let iconNudgeY = POSTER_LAYOUT.finalActionIconNudgeY;
-  let iconMax = bar.h * POSTER_LAYOUT.finalActionIconScale;
+  let iconMax =
+    POSTER_LAYOUT.finalActionBarRefH * POSTER_LAYOUT.finalActionIconScale;
   let hoverKey = null;
 
   for (let key of ["home", "share", "menu"]) {
@@ -1140,6 +1294,15 @@ function platformDrawFinalActionBar(p, alpha) {
       hoverKey = key;
     }
   }
+
+  platformDrawLiquidGlassPill(
+    bar.x,
+    bar.y,
+    bar.w,
+    bar.h,
+    hoverKey !== null,
+    alpha
+  );
 
   for (let key of ["home", "share", "menu"]) {
     let box = layout[key];
@@ -1367,7 +1530,7 @@ function platformGetIntroAnimal(id) {
   return null;
 }
 
-function platformDrawMenuAnimalTriangle(animal, centerX, centerY, size, alpha = 255) {
+function platformDrawMenuAnimalTriangle(animal, centerX, centerY, size, alpha = 255, fillHex = null) {
   let pts = animal.pts;
   let cx0 = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
   let cy0 = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
@@ -1378,7 +1541,7 @@ function platformDrawMenuAnimalTriangle(animal, centerX, centerY, size, alpha = 
   let s = maxR > 0 ? size / maxR : 1;
 
   noStroke();
-  let triColor = color(animal.color);
+  let triColor = color(fillHex || animal.color);
   triColor.setAlpha(alpha);
   fill(triColor);
   triangle(
@@ -1998,13 +2161,15 @@ function platformGetShareOverlayLayout(p) {
   };
 }
 
-function platformRecolorLineArtImage(img) {
+function platformRecolorLineArtImage(img, rgb = PLATFORM_TEXT_RGB, solidInk = false) {
   if (!img || img.width <= 0) {
     return img;
   }
 
-  if (platformLineArtRecolorCache.has(img)) {
-    return platformLineArtRecolorCache.get(img);
+  let cacheKey =
+    platformLineArtSourceKey(img) + "|" + rgb.join(",") + "|" + (solidInk ? "solid" : "lum");
+  if (platformLineArtRecolorCache.has(cacheKey)) {
+    return platformLineArtRecolorCache.get(cacheKey);
   }
 
   let w = img.width;
@@ -2012,7 +2177,7 @@ function platformRecolorLineArtImage(img) {
   let out = createImage(w, h);
   img.loadPixels();
   out.loadPixels();
-  let [tr, tg, tb] = PLATFORM_TEXT_RGB;
+  let [tr, tg, tb] = rgb;
 
   for (let i = 0; i < img.pixels.length; i += 4) {
     let a = img.pixels[i + 3];
@@ -2021,12 +2186,17 @@ function platformRecolorLineArtImage(img) {
       continue;
     }
 
-    let r = img.pixels[i];
-    let g = img.pixels[i + 1];
-    let b = img.pixels[i + 2];
-    let lum = 0.299 * r + 0.587 * g + 0.114 * b;
-    let darkness = 255 - lum;
-    let ink = darkness > 12 ? min(a, darkness) : a * darkness / 255;
+    let ink;
+    if (solidInk) {
+      ink = a;
+    } else {
+      let r = img.pixels[i];
+      let g = img.pixels[i + 1];
+      let b = img.pixels[i + 2];
+      let lum = 0.299 * r + 0.587 * g + 0.114 * b;
+      let darkness = 255 - lum;
+      ink = darkness > 12 ? min(a, darkness) : (a * darkness) / 255;
+    }
 
     if (ink < 8) {
       out.pixels[i + 3] = 0;
@@ -2040,8 +2210,24 @@ function platformRecolorLineArtImage(img) {
   }
 
   out.updatePixels();
-  platformLineArtRecolorCache.set(img, out);
+  platformLineArtRecolorCache.set(cacheKey, out);
   return out;
+}
+
+function platformProcessPosterChoiceImages() {
+  for (let id in posterRegistry) {
+    let p = posterRegistry[id];
+    let imgs = p?.images;
+    let tintHex = p?.cfg?.choiceImageColor;
+    if (!imgs || !tintHex) {
+      continue;
+    }
+
+    let rgb = platformHexToRgb(tintHex);
+    for (let key in imgs) {
+      imgs[key] = platformRecolorLineArtImage(imgs[key], rgb);
+    }
+  }
 }
 
 function platformThickenLineArtImage(img, radius = 1) {
@@ -2103,18 +2289,13 @@ function platformProcessShareIcon(img) {
 }
 
 function platformProcessLineArtImages() {
+  platformFinalHomeIcon = platformRecolorLineArtImage(
+    platformFinalHomeIcon,
+    PLATFORM_TEXT_RGB,
+    true
+  );
   platformFinalShareIcon = platformRecolorLineArtImage(platformFinalShareIcon);
-
-  for (let id in posterRegistry) {
-    let imgs = posterRegistry[id].images;
-    if (!imgs) {
-      continue;
-    }
-
-    for (let key in imgs) {
-      imgs[key] = platformRecolorLineArtImage(imgs[key]);
-    }
-  }
+  platformProcessPosterChoiceImages();
 }
 
 function platformGetShareLogo(kind) {
@@ -2433,6 +2614,7 @@ function platformReturnToIntro() {
   platformLoadingStartTime = null;
   platformPosterFadeStartTime = null;
   platformPosterFadeColor = null;
+  platformSkipNextSessionFade = false;
   posterResetAll();
   platformApplyCanvasSize();
 }
@@ -2767,6 +2949,7 @@ function platformDrawIntro() {
       platformPosterFadeColor = animal.color;
       platformPosterFadeDuration = 420;
       platformPosterFadeStartTime = millis();
+      platformSkipNextSessionFade = true;
       platformEnterAnimal(animal.id);
     }
   }
@@ -2881,7 +3064,7 @@ function posterRefreshChoiceBoxes(p) {
   let boxes = platformCreateChoiceBoxes(
     POSTER_LAYOUT.choiceW,
     POSTER_LAYOUT.choiceH,
-    POSTER_LAYOUT.choiceY,
+    posterGetChoicePanelY(p),
     POSTER_LAYOUT.choiceCenterPull
   );
   p.leftBox = boxes.left;
@@ -2930,9 +3113,18 @@ function platformStartAnimalSession(animalId) {
   let p = posterRegistry[animalId];
   p.disassembleBoost = 320;
   p.finalMotion = 0;
-  platformPosterFadeColor = PLATFORM_BG_COLOR;
-  platformPosterFadeDuration = 850;
-  platformPosterFadeStartTime = millis();
+  if (!platformSkipNextSessionFade) {
+    platformPosterFadeColor = PLATFORM_BG_COLOR;
+    platformPosterFadeDuration = 850;
+    platformPosterFadeStartTime = millis();
+  }
+  platformSkipNextSessionFade = false;
+}
+
+function platformDrawPosterHandoffFrame() {
+  platformEnsureAnimalStarted();
+  platformInvokeAnimal("draw");
+  platformDrawPosterFadeOverlay();
 }
 
 function platformBeginAnimalDirect(animalId) {
@@ -3255,12 +3447,13 @@ function platformLayoutY(refY) {
 }
 
 function platformApplyPosterViewportLayouts() {
-  POSTER_LAYOUT.looseDefaultTop = platformLayoutY(120);
-  POSTER_LAYOUT.looseDefaultBottom = platformLayoutY(720);
-  POSTER_LAYOUT.choiceKeepOutTop = platformLayoutY(670);
-  POSTER_LAYOUT.eagleScatterTop = platformLayoutY(208);
-  POSTER_LAYOUT.eagleHeaderFloorInit = platformLayoutY(128);
-  POSTER_LAYOUT.eagleHeaderFloorAdjust = platformLayoutY(200);
+  let belowHeader = posterGetBelowHeaderNudgeY();
+  POSTER_LAYOUT.looseDefaultTop = platformLayoutY(120) + belowHeader;
+  POSTER_LAYOUT.looseDefaultBottom = platformLayoutY(720) + belowHeader;
+  POSTER_LAYOUT.choiceKeepOutTop = platformLayoutY(670) + belowHeader;
+  POSTER_LAYOUT.eagleScatterTop = platformLayoutY(208) + belowHeader;
+  POSTER_LAYOUT.eagleHeaderFloorInit = platformLayoutY(128) + belowHeader;
+  POSTER_LAYOUT.eagleHeaderFloorAdjust = platformLayoutY(200) + belowHeader;
 
   for (let id in posterRegistry) {
     let p = posterRegistry[id];
@@ -3270,15 +3463,15 @@ function platformApplyPosterViewportLayouts() {
     }
 
     if (p.cfg.glow && refs.glowCy != null) {
-      p.cfg.glow.cy = platformLayoutY(refs.glowCy);
+      p.cfg.glow.cy = platformLayoutY(refs.glowCy) + belowHeader;
     }
 
     let composition = p.cfg.loosePiece && p.cfg.loosePiece.composition;
     if (composition && refs.compTop != null) {
-      composition.top = platformLayoutY(refs.compTop);
+      composition.top = platformLayoutY(refs.compTop) + belowHeader;
       composition.bottom =
         refs.compBottom != null
-          ? platformLayoutY(refs.compBottom)
+          ? platformLayoutY(refs.compBottom) + belowHeader
           : POSTER_LAYOUT.choiceY - ms(48);
     }
 
@@ -3297,19 +3490,21 @@ function platformApplyViewportLayout() {
   platformText.introHint.y = platformLayoutY(620) + ms(160) + INTRO_SCREEN_NUDGE_Y;
   platformText.loadingHint.y = platformLayoutY(560) - ms(120);
   platformText.questionTitle.y =
-    platformLayoutY(920) + POSTER_LAYOUT.questionPhaseNudgeY;
+    platformLayoutY(920) + POSTER_LAYOUT.questionPhaseNudgeY + posterGetBelowHeaderNudgeY();
+  platformApplyChoiceLayoutMetrics();
   POSTER_LAYOUT.headerLineY = platformLayoutY(60) + ms(20);
   POSTER_LAYOUT.headerTextY = platformLayoutY(34) + ms(5) + ms(20);
   POSTER_LAYOUT.choiceY =
     platformText.questionTitle.y - POSTER_LAYOUT.choiceH - ms(35);
-  POSTER_LAYOUT.answerTop = platformLayoutY(715);
-  POSTER_LAYOUT.footerTop = platformLayoutY(882);
+  POSTER_LAYOUT.answerTop = platformLayoutY(715) + posterGetBelowHeaderNudgeY();
+  POSTER_LAYOUT.footerTop = platformLayoutY(882) + posterGetBelowHeaderNudgeY();
   POSTER_LAYOUT.finalTextCenterOffset = platformLayoutY(24);
 
   for (let id in PLATFORM_FEEDBACK_REF_Y) {
     let p = posterRegistry[id];
     if (p && p.cfg && p.cfg.feedback) {
-      p.cfg.feedback.y = platformLayoutY(PLATFORM_FEEDBACK_REF_Y[id]);
+      p.cfg.feedback.y =
+        platformLayoutY(PLATFORM_FEEDBACK_REF_Y[id]) + posterGetBelowHeaderNudgeY();
     }
   }
 
@@ -3543,10 +3738,6 @@ function platformLooseClearHomeFromAllZones(cfg, offsetX, offsetY, index) {
 
   let kept = platformLoosePushFromChoiceKeepOut(cfg, cleared.x, cleared.y, index, 0);
 
-  if (cfg.id === "eagle") {
-    return kept;
-  }
-
   return platformLooseClampTargetAboveChoice(cfg, kept.x, kept.y, index, 0);
 }
 
@@ -3768,7 +3959,7 @@ function platformLoosePushFromChoiceKeepOut(cfg, offsetX, offsetY, index, rot) {
   let forbid = {
     left: keepOut.left ?? mx(16),
     right: keepOut.right ?? platformW - mx(16),
-    top: keepOut.top ?? platformLayoutY(670),
+    top: (keepOut.top ?? platformLayoutY(670)) + platformGetChoiceLayoutNudgeY(),
     bottom: keepOut.bottom ?? platformH
   };
   let ox = offsetX;
@@ -3812,7 +4003,8 @@ function platformLooseClampTargetAboveChoice(cfg, offsetX, offsetY, index, rot =
   }
 
   let pivot = profile.pivot;
-  let ceilingScreenY = keepOut.top - (keepOut.pad ?? ms(10)) - ms(6);
+  let ceilingScreenY =
+    keepOut.top + platformGetChoiceLayoutNudgeY() - (keepOut.pad ?? ms(10)) - ms(6);
   let ox = offsetX;
   let oy = offsetY;
 
@@ -3960,12 +4152,16 @@ function platformLooseCircularGoalScreen(index, count, cfg, layout = {}) {
 
   if (cfg.id === "deer" || cfg.id === "turtle" || cfg.id === "toad") {
     top = zone.top + ms(4);
-    bottom = min(zone.bottom - ms(4), POSTER_LAYOUT.choiceY - ms(28));
+    bottom =
+      min(zone.bottom - ms(4), POSTER_LAYOUT.choiceY - ms(28)) +
+      platformGetChoiceLayoutNudgeY();
   } else if (cfg.id === "eagle") {
     top = zone.top - ms(4);
-    bottom = POSTER_LAYOUT.choiceY - ms(44);
+    bottom = POSTER_LAYOUT.choiceY - ms(44) + platformGetChoiceLayoutNudgeY();
   } else {
-    bottom = min(bottom, POSTER_LAYOUT.choiceY - ms(72));
+    bottom =
+      min(bottom, POSTER_LAYOUT.choiceY - ms(72)) +
+      platformGetChoiceLayoutNudgeY();
   }
 
   let uv = platformLooseScatterUVForIndex(index, count, layout);
@@ -4094,7 +4290,9 @@ function platformLooseCircularAdjustLooseTargets(targets, cfg) {
   if (cfg.id === "eagle") {
     let keepOut = platformLooseGetProfile(cfg).choiceKeepOut;
     let ceilingScreenY =
-      keepOut ? keepOut.top - ms(40) : platformH;
+      keepOut
+        ? keepOut.top + platformGetChoiceLayoutNudgeY() - ms(40)
+        : platformH;
     let headerFloor = POSTER_LAYOUT.eagleHeaderFloorInit;
 
     for (let i = 0; i < targets.length; i++) {
@@ -4136,7 +4334,8 @@ function eagleAssignScatterSlots(targets, cfg) {
   let left = mx(12);
   let right = platformW - mx(12);
   let top = POSTER_LAYOUT.eagleScatterTop;
-  let bottom = POSTER_LAYOUT.choiceY - ms(54);
+  let bottom =
+    POSTER_LAYOUT.choiceY - ms(54) + platformGetChoiceLayoutNudgeY();
   let slotUV = [
     [0.82, 0.04], [0.96, 0.03], [0.70, 0.07], [0.90, 0.13],
     [0.06, 0.22], [0.20, 0.34], [0.03, 0.46], [0.14, 0.56], [0.05, 0.66], [0.18, 0.76],
@@ -4203,16 +4402,6 @@ function eagleSeparateLooseTargets(targets, cfg) {
 
 function platformLooseScenarioTGroupFromClick(p) {
   let cc = p.clickCount;
-  let id = p.cfg.id;
-
-  if (id === "eagle") {
-    return [
-      cc >= 1 ? 1 : 0,
-      cc >= 2 ? 1 : 0,
-      cc >= 3 ? 1 : 0,
-      cc >= 4 ? 1 : 0
-    ];
-  }
 
   return [
     cc >= 1 ? 1 : 0,
@@ -4417,7 +4606,9 @@ function deerAssignScatterSlots(targets, cfg) {
   let left = zone.left + ms(8);
   let right = zone.right - ms(8);
   let top = zone.top + ms(8);
-  let bottom = min(zone.bottom - ms(8), POSTER_LAYOUT.choiceY - ms(72));
+  let bottom =
+    min(zone.bottom - ms(8), POSTER_LAYOUT.choiceY - ms(72)) +
+    platformGetChoiceLayoutNudgeY();
 
   let slotUV = [
     [0.84, 0.44], [0.76, 0.52], [0.86, 0.58], [0.72, 0.40], [0.82, 0.36],
@@ -4693,7 +4884,9 @@ function toadAssignScatterSlots(targets, cfg, blend = 1) {
   let left = zone.left + ms(8);
   let right = zone.right - ms(8);
   let top = zone.top + ms(8);
-  let bottom = min(zone.bottom - ms(8), POSTER_LAYOUT.choiceY - ms(72));
+  let bottom =
+    min(zone.bottom - ms(8), POSTER_LAYOUT.choiceY - ms(72)) +
+    platformGetChoiceLayoutNudgeY();
   let centerU = 0.5;
   let centerV = 0.41;
   let GOLDEN_ANGLE = PI * (3 - sqrt(5));
@@ -4839,10 +5032,10 @@ function toadKeepLooseTargetsClearOfConnected(targets, cfg) {
   }
 }
 
-function platformToadWarmLooseRepel(p) {
+function platformWarmLooseRepelAfterConnect(p, blend = 0.62) {
   let cfg = p.cfg;
 
-  if (!cfg || cfg.id !== "toad" || !cfg.getPieceGroup) {
+  if (!cfg?.getPieceGroup) {
     return;
   }
 
@@ -4854,20 +5047,7 @@ function platformToadWarmLooseRepel(p) {
 
   let pivot = profile.pivot;
   let savedTGroup = p.tGroup.slice();
-  let projected = [0, 0, 0, 0];
-
-  if (p.clickCount >= 1) {
-    projected[0] = 1;
-  }
-  if (p.clickCount >= 2) {
-    projected[1] = 1;
-  }
-  if (p.clickCount >= 3) {
-    projected[2] = 1;
-    projected[3] = 1;
-  }
-
-  p.tGroup = projected;
+  p.tGroup = platformLooseScenarioTGroupFromClick(p);
 
   if (!p.looseRepelSmooth) {
     p.looseRepelSmooth = [];
@@ -4909,12 +5089,20 @@ function platformToadWarmLooseRepel(p) {
     let prev = p.looseRepelSmooth[i] || { x: 0, y: 0 };
 
     p.looseRepelSmooth[i] = {
-      x: lerp(prev.x, desired.x, 0.62),
-      y: lerp(prev.y, desired.y, 0.62)
+      x: lerp(prev.x, desired.x, blend),
+      y: lerp(prev.y, desired.y, blend)
     };
   }
 
   p.tGroup = savedTGroup;
+}
+
+function platformToadWarmLooseRepel(p) {
+  if (!p?.cfg || p.cfg.id !== "toad") {
+    return;
+  }
+
+  platformWarmLooseRepelAfterConnect(p);
 }
 
 function toadAdjustLooseTargets(targets, cfg) {
@@ -4942,7 +5130,9 @@ function eagleAdjustLooseTargets(targets, cfg) {
 
   let keepOut = platformLooseGetProfile(cfg).choiceKeepOut;
   let ceilingScreenY =
-    keepOut ? keepOut.top - (keepOut.pad ?? ms(10)) - ms(6) : platformH;
+    keepOut
+      ? keepOut.top + platformGetChoiceLayoutNudgeY() - (keepOut.pad ?? ms(10)) - ms(6)
+      : platformH;
   let headerFloor = POSTER_LAYOUT.eagleHeaderFloorAdjust;
 
   for (let i = 0; i < targets.length; i++) {
@@ -5774,12 +5964,13 @@ function platformLooseGetCompositionBounds(cfg = {}) {
   let profile = platformLooseGetProfile(cfg);
   let pad = profile.composition.pad ?? ms(6);
   let c = profile.composition;
+  let nudge = platformGetChoiceLayoutNudgeY();
 
   return {
     left: c.left + pad,
     right: c.right - pad,
-    top: c.top + pad,
-    bottom: c.bottom - pad
+    top: c.top + pad + nudge,
+    bottom: c.bottom - pad + nudge
   };
 }
 
@@ -6256,20 +6447,24 @@ function platformLooseRepelMix(pieceT, p = null) {
 }
 
 function platformLooseGetRepelGroupT(p, groupIndex) {
-  if (!p?.cfg || p.cfg.id !== "toad" || p.disassembleBoost > 0) {
+  if (!p?.cfg || p.disassembleBoost > 0) {
     return p.tGroup[groupIndex];
   }
 
-  if (groupIndex === 0 && p.clickCount >= 1) {
-    return 1;
-  }
+  if (p.cfg.id === "toad") {
+    if (groupIndex === 0 && p.clickCount >= 1) {
+      return 1;
+    }
 
-  if (groupIndex === 1 && p.clickCount >= 2) {
-    return 1;
-  }
+    if (groupIndex === 1 && p.clickCount >= 2) {
+      return 1;
+    }
 
-  if (groupIndex >= 2 && p.clickCount >= 3) {
-    return 1;
+    if (groupIndex >= 2 && p.clickCount >= 3) {
+      return 1;
+    }
+
+    return p.tGroup[groupIndex];
   }
 
   return p.tGroup[groupIndex];
@@ -6836,15 +7031,8 @@ function platformApplyLoosePieceTransform(p, index, t) {
   }
 
   let assembleT = platformEaseInOutSine(t);
-  let homeY = 0;
-  if (cfg.id === "eagle" && profile.assembledHomeNudgeY) {
-    let dt = platformLooseGetDrawTransform(cfg);
-    homeY =
-      platformScreenPxToAnimalRefY(profile.assembledHomeNudgeY) /
-      max(abs(dt.scaleY), 0.001);
-  }
   let currentX = lerp(spaceX, 0, assembleT);
-  let currentY = lerp(spaceY, homeY, assembleT);
+  let currentY = lerp(spaceY, 0, assembleT);
   let currentRot = lerp(spaceRot, 0, assembleT);
   let pulseScale = platformGetLoosePositivePulseScale(p, t);
   let assembleLiftY = 0;
@@ -7131,9 +7319,9 @@ function platformGetChoiceImageDrawSize(img, maxSize) {
 }
 
 function platformGetChoicePanelLayout(w, label, img, font, imgId = "") {
-  let btnH = POSTER_LAYOUT.choiceBtnH;
+  let btnSize = POSTER_LAYOUT.choiceBtnSize;
   let tweaks = platformChoiceImageTweaks[imgId] || {};
-  let imgSlotH = min(POSTER_LAYOUT.choiceImageSize, btnH * 0.72);
+  let imgSlotH = min(POSTER_LAYOUT.choiceImageSize, btnSize * 0.62);
   let drawSize = platformGetChoiceImageDrawSize(
     img,
     imgSlotH * (tweaks.maxSizeScale ?? 1)
@@ -7149,15 +7337,15 @@ function platformGetChoicePanelLayout(w, label, img, font, imgId = "") {
   );
 
   return {
-    btnH,
+    btnH: btnSize,
     imgX: w / 2,
-    imgCenterY: btnH / 2 + (tweaks.offsetY || 0),
+    imgCenterY: btnSize / 2 + (tweaks.offsetY || 0),
     imgW: drawSize.w,
     imgH: drawSize.h,
-    labelY: btnH + labelGap,
+    labelY: btnSize + labelGap,
     labelLeading,
     labelSize,
-    totalH: btnH + labelGap + labelH
+    totalH: btnSize + labelGap + labelH
   };
 }
 
@@ -7190,22 +7378,20 @@ function platformDrawChoicePanel(config) {
   let side = abs(x - leftBoxX) < 1 ? "left" : "right";
   let wrongShakeX = platformGetWrongShakeX(animalId, side);
   let s = hover ? 1.04 : 1;
-  let cornerR = POSTER_LAYOUT.choiceGlassCornerRadius;
+  let btnSize = POSTER_LAYOUT.choiceBtnSize;
 
   let layout = platformGetChoicePanelLayout(w, label, img, font, imgId);
 
-  // Frosted glass slab in screen space so its backdrop capture aligns.
   let glassCx = x + wrongShakeX + w / 2;
-  let glassBw = w * s;
-  let glassBh = layout.btnH * s;
-  let glassBx = glassCx - glassBw / 2;
-  let glassBy = y + (layout.btnH - glassBh) / 2;
+  let glassSize = btnSize * s;
+  let glassBx = glassCx - glassSize / 2;
+  let glassBy = y + (layout.btnH - glassSize) / 2;
   platformDrawChoiceButton(
     glassBx,
     glassBy,
-    glassBw,
-    glassBh,
-    cornerR * s,
+    glassSize,
+    glassSize,
+    glassSize / 2,
     hover
   );
 
@@ -7279,7 +7465,7 @@ function platformDrawQuestionTitle(textColor) {
   platformDrawTightWordText(
     platformText.questionTitle.text,
     platformText.questionTitle.x,
-    platformText.questionTitle.y,
+    platformText.questionTitle.y + POSTER_LAYOUT.questionTitleNudgeY,
     platformText.questionTitle.leading,
     "center"
   );
@@ -7396,6 +7582,25 @@ function platformDrawProgressPill(cx, y, pillW, pillH, pillR, fillAmt, brown, br
   rect(x0 + fw / 2, y, fw, pillH, pillR);
 }
 
+function platformGetHeaderProgressLayout(p) {
+  let total = platformGetQuestionStageCount(p);
+  let pillW = POSTER_LAYOUT.progressPillW;
+  let pillH = POSTER_LAYOUT.progressPillH;
+  let stepGap = POSTER_LAYOUT.progressStepGap;
+  let lineY = posterGetHeaderLineY();
+  let startX =
+    platformW / 2 -
+    (stepGap * (total - 1)) / 2 +
+    POSTER_LAYOUT.progressHeaderNudgeX;
+  let y =
+    lineY +
+    POSTER_LAYOUT.progressGapBelowHeaderLine +
+    pillH / 2 +
+    POSTER_LAYOUT.progressHeaderNudgeY;
+
+  return { startX, y, pillW, pillH, pillR: POSTER_LAYOUT.progressPillRadius, stepGap, total };
+}
+
 function platformDrawQuestionProgress(p) {
   let cfg = p.cfg;
   let total = platformGetQuestionStageCount(p);
@@ -7403,11 +7608,7 @@ function platformDrawQuestionProgress(p) {
     return;
   }
 
-  let pillW = POSTER_LAYOUT.progressPillW;
-  let pillH = POSTER_LAYOUT.progressPillH;
-  let pillR = POSTER_LAYOUT.progressPillRadius;
-  let stepGap = POSTER_LAYOUT.progressStepGap;
-  let y = platformGetProgressBaseY() + pillH / 2;
+  let layout = platformGetHeaderProgressLayout(p);
   let brown = color(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 255);
   let brownMuted = color(
     PLATFORM_TEXT_RGB[0],
@@ -7415,9 +7616,7 @@ function platformDrawQuestionProgress(p) {
     PLATFORM_TEXT_RGB[2],
     POSTER_LAYOUT.progressUpcomingAlpha
   );
-  // clickCount 0 → Q1 (step 0 filled), 1 → steps 0–1 filled, 2 → all filled
   let currentIndex = constrain(p.clickCount, 0, total - 1);
-  let startX = platformW / 2 - (stepGap * (total - 1)) / 2;
 
   push();
   drawingContext.globalAlpha = 1;
@@ -7425,9 +7624,18 @@ function platformDrawQuestionProgress(p) {
   noStroke();
 
   for (let i = 0; i < total; i++) {
-    let cx = startX + i * stepGap;
+    let cx = layout.startX + i * layout.stepGap;
     let fillAmt = platformGetProgressPillFillAmt(p, i, currentIndex);
-    platformDrawProgressPill(cx, y, pillW, pillH, pillR, fillAmt, brown, brownMuted);
+    platformDrawProgressPill(
+      cx,
+      layout.y,
+      layout.pillW,
+      layout.pillH,
+      layout.pillR,
+      fillAmt,
+      brown,
+      brownMuted
+    );
   }
 
   pop();
@@ -7572,10 +7780,11 @@ const POSTER_LAYOUT = {
   headerNudgeY: -30,
   headerLineNudgeY: ms(2),
   headerRowNudgeY: ms(20),
-  backButtonSize: ms(63),
-  backButtonGlyphSize: ms(63),
+  posterBelowHeaderNudgeY: 2,
+  backButtonSize: ms(78),
+  backButtonGlyphSize: ms(78),
   backButtonLabelGap: ms(8),
-  backButtonStrokeWeight: ms(1.4),
+  backButtonStrokeWeight: ms(1.65),
   headerBackNudgeX: ms(-14),
   headerNameNudgeX: ms(-12),
   headerNameNudgeY: ms(-8),
@@ -7585,9 +7794,10 @@ const POSTER_LAYOUT = {
   finalMessageNudgeY: -60,
   finalPosterNudgeY: ms(90),
   feedbackNudgeY: -25,
-  choiceW: ms(168),
-  choiceBtnH: ms(108),
-  choiceH: ms(162),
+  choiceW: ms(147),
+  choiceBtnSize: ms(147),
+  choiceBtnH: ms(147),
+  choiceH: ms(147) + ms(18) + ms(50),
   choiceLabelGap: ms(18),
   choiceY: platformText.questionTitle.y - ms(162) - ms(35),
   answerTop: my(715),
@@ -7595,10 +7805,10 @@ const POSTER_LAYOUT = {
   finalTextCenterOffset: my(24),
   finalIntro: 4000,
   finalFade: 900,
-  choiceImageSize: ms(108),
+  choiceImageSize: ms(83),
   choiceCornerRadius: ms(14),
   choiceGlassCornerRadius: ms(20),
-  choiceCenterPull: ms(22),
+  choiceCenterPull: ms(42),
   finalTitleYOffset: 2,
   finalContentYOffset: -10,
   finalBodyX: mx(345),
@@ -7608,7 +7818,8 @@ const POSTER_LAYOUT = {
   finalBodyLineCount: 7,
   finalCtaGap: ms(26),
   finalActionBarW: ms(305),
-  finalActionBarH: ms(68),
+  finalActionBarH: ms(82),
+  finalActionBarRefH: ms(68),
   finalActionBarPadX: ms(14),
   finalActionIconScale: 0.70,
   finalActionIconNudgeY: ms(4),
@@ -7646,7 +7857,13 @@ const POSTER_LAYOUT = {
   shareSheetIconR: ms(34),
   shareSheetIconDrawPad: ms(8),
   frameStrokeWeight: 0.9,
-  questionPhaseNudgeY: -10,
+  questionPhaseNudgeY: 10,
+  questionPlayNudgeY: 20,
+  choicePanelNudgeY: -8,
+  questionTitleNudgeY: -8,
+  progressHeaderNudgeX: 0,
+  progressHeaderNudgeY: 10,
+  progressGapBelowHeaderLine: ms(18),
   progressGapBelowQuestion: ms(21),
   progressPillW: ms(38),
   progressPillH: ms(7),
@@ -7830,6 +8047,7 @@ const posterRegistry = {
     finalClickCount: 3,
     textColor: PLATFORM_TEXT_COLOR,
     choiceButtonColor: "#a3b57b",
+    choiceImageColor: PLATFORM_TEXT_COLOR,
     bgTop: "#EEF3DD",
     bgBottom: "#C6D7A7",
     glow: { r: 245, g: 238, b: 204, cy: my(400), maxR: mx(540), step: 18, maxA: 28, ws: 1.08, hs: 0.76 },
@@ -7925,9 +8143,10 @@ const posterRegistry = {
     applyPiece: applyTurtlePieceTransform
   }),
   eagle: posterCreateState("eagle", {
-    finalClickCount: 4,
+    finalClickCount: 3,
     textColor: PLATFORM_TEXT_COLOR,
     choiceButtonColor: "#c7aa89",
+    choiceImageColor: PLATFORM_TEXT_COLOR,
     textRgb: PLATFORM_TEXT_RGB,
     bgTop: "#ECE9E1",
     bgBottom: "#DDBA90",
@@ -7941,7 +8160,9 @@ const posterRegistry = {
     feedback: { rgb: true, y: my(690) },
     pipeline: ["bg", "animal", "question", "footer", "feedback", "frame", "header"],
     resetFinalOnCorrect: false,
-    nextClickCount(stage) { return stage === 2 ? 4 : stage + 1; },
+    nextClickCount(stage) {
+      return stage + 1;
+    },
     randomSeed: 100,
     totalPieces: 19,
     pieceRandom: {
@@ -7960,31 +8181,16 @@ const posterRegistry = {
       return 2;
     },
     assembleZones: [
-      { cx: 520, cy: 520, rx: 220, ry: 200, influence: 1.02 },
-      { cx: 470, cy: 440, rx: 150, ry: 140, influence: 1.02 },
       { cx: 282, cy: 245, rx: 142, ry: 148, influence: 1.02 },
+      { cx: 470, cy: 440, rx: 150, ry: 140, influence: 1.02 },
+      { cx: 520, cy: 520, rx: 220, ry: 200, influence: 1.02 },
       { cx: 565, cy: 880, rx: 175, ry: 130, influence: 1.02 }
     ],
     loosePiece: {
       pivot: { x: 500, y: 500 },
       scatter: { x: 0, y: 0 },
       hyenaStyleRepel: true,
-      useZonePush: true,
-      zonePushRuntime: true,
-      dampenWobbleNearBody: true,
-      zonePushPad: ms(4),
-      zonePushBlend: 1,
-      assembleClearance: ms(14),
-      assembledScreenLift: 35,
-      assembledHomeNudgeY: ms(40),
-      looseRepelFollow: 0.22,
-      choiceKeepOut: {
-        left: mx(24),
-        right: platformW - mx(24),
-        top: POSTER_LAYOUT.choiceY,
-        bottom: platformH,
-        pad: ms(24)
-      },
+      assembleClearance: ms(20),
       drawTransform: {
         originX: ANIMAL_REF_W / 2 - 42,
         originY: 405,
@@ -8047,6 +8253,7 @@ const posterRegistry = {
     finalClickCount: 3,
     textColor: PLATFORM_TEXT_COLOR,
     choiceButtonColor: "#ddb991",
+    choiceImageColor: PLATFORM_TEXT_COLOR,
     bgTop: "#F4D4B8",
     bgBottom: "#DFA173",
     glow: { r: 255, g: 232, b: 198, cy: my(430), maxR: mx(520), step: 18, maxA: 24, ws: 1.02, hs: 0.74 },
@@ -8058,7 +8265,7 @@ const posterRegistry = {
     },
     textRgb: PLATFORM_TEXT_RGB,
     feedback: { rgb: true, y: my(700) },
-    pipeline: ["bg", "header", "animal", "question", "footer", "feedback", "frame"],
+    pipeline: ["bg", "animal", "question", "footer", "feedback", "frame", "header"],
     resetFinalOnCorrect: true,
     nextClickCount(stage) { return stage + 1; },
     randomSeed: 12,
@@ -8146,6 +8353,7 @@ const posterRegistry = {
     textColor: PLATFORM_TEXT_COLOR,
     textRgb: PLATFORM_TEXT_RGB,
     choiceButtonColor: "#c1b783",
+    choiceImageColor: PLATFORM_TEXT_COLOR,
     headerTitle: "Pelobates syriacus",
     headerLeading: ms(18),
     finalFooter: { text: "Only a few populations\nremain in Israel" },
@@ -8251,6 +8459,7 @@ const posterRegistry = {
     textColor: PLATFORM_TEXT_COLOR,
     textRgb: PLATFORM_TEXT_RGB,
     choiceButtonColor: "#b4895d",
+    choiceImageColor: PLATFORM_TEXT_COLOR,
     headerTitle: "Striped Hyena",
     headerLeading: ms(64),
     finalFooter: { text: "About 1,000 Striped\nHyenas left in Israel" },
@@ -8313,10 +8522,6 @@ function platformClearSharedPosterCaches() {
 
 function platformPosterTGroupTarget(p, groupIndex) {
   let cc = p.clickCount;
-
-  if (p.cfg.id === "eagle") {
-    return cc >= [1, 2, 3, 4][groupIndex] ? 1 : 0;
-  }
 
   if (groupIndex <= 1) {
     return cc >= groupIndex + 1 ? 1 : 0;
@@ -8483,6 +8688,7 @@ function posterSetup(id) {
   let p = posterRegistry[id];
   let cfg = p.cfg;
   platformApplyCanvasSize();
+  platformSyncActiveQuestionNudge(p);
   platformApplyGrungeFont(p.grungeFont);
   posterRefreshChoiceBoxes(p);
   randomSeed(cfg.randomSeed);
@@ -8551,12 +8757,44 @@ function platformHandlePosterBackPress() {
   return false;
 }
 
+function posterGetBelowHeaderNudgeY() {
+  return POSTER_LAYOUT.posterBelowHeaderNudgeY;
+}
+
+function posterGetQuestionPlayNudgeY(p) {
+  if (!p || !p.cfg || p.clickCount >= p.cfg.finalClickCount) {
+    return 0;
+  }
+  return POSTER_LAYOUT.questionPlayNudgeY;
+}
+
+function posterGetChoicePanelY(p) {
+  return (
+    POSTER_LAYOUT.choiceY +
+    posterGetQuestionPlayNudgeY(p) +
+    POSTER_LAYOUT.choicePanelNudgeY
+  );
+}
+
+function platformGetActiveQuestionPlayNudgeY() {
+  return platformActivePosterQuestionNudgeY;
+}
+
+function platformGetChoiceLayoutNudgeY() {
+  return platformActivePosterQuestionNudgeY + POSTER_LAYOUT.choicePanelNudgeY;
+}
+
+function platformSyncActiveQuestionNudge(p) {
+  platformActivePosterQuestionNudgeY = posterGetQuestionPlayNudgeY(p);
+}
+
 function posterGetHeaderLineY() {
   return (
     POSTER_LAYOUT.headerLineY +
     POSTER_LAYOUT.headerNudgeY +
     POSTER_LAYOUT.headerLineNudgeY +
-    POSTER_LAYOUT.headerRowNudgeY
+    POSTER_LAYOUT.headerRowNudgeY +
+    posterGetBelowHeaderNudgeY()
   );
 }
 
@@ -8622,6 +8860,14 @@ function posterDrawFrame(p) {
   noFill();
   stroke(cfg.textColor);
   line(POSTER_LAYOUT.marginX, lineY, platformW - POSTER_LAYOUT.marginX, lineY);
+
+  if (p.clickCount < cfg.finalClickCount) {
+    let fProg = wrongFallGetElemTransform(p, "progress");
+    push();
+    translate(fProg.x, fProg.y);
+    platformDrawQuestionProgress(p);
+    pop();
+  }
 }
 
 function posterDrawHeader(p) {
@@ -8655,6 +8901,10 @@ function posterDrawQuestionUI(p) {
     return;
   }
 
+  let questionNudge = posterGetQuestionPlayNudgeY(p);
+  push();
+  translate(0, questionNudge);
+
   // Question title — its own fall
   let fQ = wrongFallGetElemTransform(p, "question");
   push();
@@ -8664,13 +8914,6 @@ function posterDrawQuestionUI(p) {
   pop();
 
   platformDrawWrongTryAgain(p, cfg.textColor);
-
-  // Progress bar — its own fall
-  let fProg = wrongFallGetElemTransform(p, "progress");
-  push();
-  translate(fProg.x, fProg.y);
-  platformDrawQuestionProgress(p);
-  pop();
 
   // Choices — left and right each fall independently
   let stages = cfg.choiceStages || platformChoiceStages;
@@ -8693,6 +8936,8 @@ function posterDrawQuestionUI(p) {
       p.images[stage.right.img], stage.right.label, stage.right.img, stage.right);
     pop();
   }
+
+  pop();
 }
 
 function posterDrawChoicePanel(p, x, y, w, h, img, label, imgId, choice = {}) {
@@ -8812,7 +9057,9 @@ function posterDrawFooter(p) {
   platformDrawTightWordText(
     cfg.finalFooter.text,
     platformText.questionTitle.x,
-    platformText.introTitle.y + POSTER_LAYOUT.finalFooterNudgeY,
+    platformText.introTitle.y +
+    POSTER_LAYOUT.finalFooterNudgeY +
+    posterGetBelowHeaderNudgeY(),
     platformText.finalFooter.leading
   );
 }
@@ -8866,6 +9113,7 @@ function posterTickWrongAnimation(p) {
 function posterDraw(id) {
   let p = posterRegistry[id];
   let cfg = p.cfg;
+  platformSyncActiveQuestionNudge(p);
   posterEnsurePlayReady(p);
   posterTickWrongAnimation(p);
   platformTickProgressFill(p);
@@ -8991,7 +9239,7 @@ const platformAnimalHandlers = {
     windowResized: () => posterWindowResized("turtle")
   },
   eagle: {
-    finalClickCount: 4,
+    finalClickCount: 3,
     draw: () => posterDraw("eagle"),
     setup: () => posterSetup("eagle"),
     mousePressed: () => posterMousePressed("eagle"),
@@ -9288,7 +9536,7 @@ function drawEagleAnimal() {
   let floatIntensity;
 
   let eagleFullyAssembled =
-    p.clickCount >= 4 &&
+    p.clickCount >= p.cfg.finalClickCount &&
     p.tGroup[0] > 0.96 &&
     p.tGroup[1] > 0.96 &&
     p.tGroup[2] > 0.96 &&
@@ -10243,12 +10491,14 @@ function hyenaGetScatterBounds() {
     platformText.introTitle.y +
     ms(52) +
     ms(HYENA_SCATTER_OFFSET_Y) -
-    ms(HYENA_SCATTER_EXPAND_Y);
+    ms(HYENA_SCATTER_EXPAND_Y) +
+    posterGetBelowHeaderNudgeY();
   let bottomScreen =
     POSTER_LAYOUT.choiceY -
     ms(22) +
     ms(HYENA_SCATTER_OFFSET_Y) +
-    ms(HYENA_SCATTER_EXPAND_Y);
+    ms(HYENA_SCATTER_EXPAND_Y) +
+    platformGetChoiceLayoutNudgeY();
   let sidePad = max(4, 16 - HYENA_SCATTER_EXPAND_X);
 
   return {
