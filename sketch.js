@@ -412,6 +412,11 @@ function platformScreenPxToAnimalRefY(screenPx) {
 }
 
 const PLATFORM_EAGLE_FINAL_ORIGIN_Y = 405 - platformScreenPxToAnimalRefY(20);
+const PLATFORM_DEER_FINAL_ORIGIN_X = 30 + platformScreenPxToAnimalRefY(10);
+const PLATFORM_DEER_FINAL_ORIGIN_Y =
+  -80 +
+  platformScreenPxToAnimalRefY(DEER_HYENA_EXTRA_SCREEN_OFFSET_Y) +
+  platformScreenPxToAnimalRefY(15);
 
 let platformTriangleDrawPass = 0;
 let platformSuppressAnimalPieceDraw = false;
@@ -8359,7 +8364,13 @@ function posterCreateState(id, cfg) {
     jumpReadyTime: null,
     touchDevice: false,
     finalMotion: 0,
-    deer: { x: 30, y: -80, scale: PLATFORM_DEER_ANIMAL_SCALE, drawX: 30, drawY: -80 },
+    deer: {
+      x: PLATFORM_DEER_FINAL_ORIGIN_X,
+      y: PLATFORM_DEER_FINAL_ORIGIN_Y,
+      scale: PLATFORM_DEER_ANIMAL_SCALE,
+      drawX: PLATFORM_DEER_FINAL_ORIGIN_X,
+      drawY: PLATFORM_DEER_FINAL_ORIGIN_Y
+    },
     hyena: { x: 26, y: -8, scale: 0.6, drawX: 26, drawY: -8 },
     wrongFallT: 0,
     wrongFallActive: false,
@@ -8645,7 +8656,7 @@ const posterRegistry = {
       assembleClearance: ms(20),
       drawTransform: {
         originX: ANIMAL_REF_W / 2 - 42,
-        originY: 405,
+        originY: PLATFORM_EAGLE_FINAL_ORIGIN_Y,
         scale: PLATFORM_EAGLE_ANIMAL_SCALE,
         pivotX: 500,
         pivotY: 500
@@ -9999,7 +10010,7 @@ function drawEagleAnimal() {
   p.finalMotion = lerp(p.finalMotion, finalAlive ? 1 : 0, 0.035);
 
   vultureX = ANIMAL_REF_W / 2 - 42;
-  vultureY = 405;
+  vultureY = PLATFORM_EAGLE_FINAL_ORIGIN_Y;
   vultureScale = PLATFORM_EAGLE_ANIMAL_SCALE;
   vultureRot = 0;
   // Keep loose scatter pieces stable during assembly — perch motion only when fully built.
