@@ -936,12 +936,14 @@ function platformGetFinalActionBarLayout(p) {
     dock.x +
     dock.w * POSTER_LAYOUT.finalActionShareXRatio +
     POSTER_LAYOUT.finalActionShareXNudge;
+  let shapeDown = POSTER_LAYOUT.finalActionDockShapeDownNudge;
   let wingCy =
     dock.y +
     (dock.h + dipDepth) / 2 +
     POSTER_LAYOUT.finalActionWingIconNudgeY +
     POSTER_LAYOUT.finalActionDockContentNudgeY +
-    POSTER_LAYOUT.finalActionWingIconUpNudge;
+    POSTER_LAYOUT.finalActionWingIconUpNudge -
+    shapeDown;
   let notchCy =
     dock.y +
     dipDepth * POSTER_LAYOUT.finalActionMenuNotchYRatio +
@@ -1054,10 +1056,12 @@ function platformGetFinalActionDockLayout() {
   let dockH = POSTER_LAYOUT.finalActionDockH;
   let scale = max(platformScreenScale || 1, 0.001);
   let screenBleed = platformGetFinalDockBleedHeightPx() / scale;
+  let shapeDown = POSTER_LAYOUT.finalActionDockShapeDownNudge;
   let bottomY = min(
     platformGetViewportCanvasBottomY() +
       POSTER_LAYOUT.finalActionDockDownNudge +
-      screenBleed,
+      screenBleed +
+      shapeDown,
     platformH
   );
   return {
@@ -8244,6 +8248,7 @@ const POSTER_LAYOUT = {
   finalActionWingIconScale: 0.90,
   finalActionWingIconUpNudge: -ms(8),
   finalActionDockDownNudge: ms(10),
+  finalActionDockShapeDownNudge: ms(8),
   finalActionDockContentNudgeY: ms(6),
   finalActionIconNudgeY: ms(4),
   finalActionMenuIconNudgeX: 2,
