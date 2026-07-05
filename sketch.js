@@ -401,6 +401,121 @@ const PLATFORM_SHARE_BACK_NUDGE_Y = ms(10);
 const PLATFORM_SHARE_ICONS_NUDGE_Y = ms(10);
 const PLATFORM_LOADING_TRIANGLE_SIZE = mx(72);
 
+let platformBlurScratchA = null;
+let platformBlurScratchB = null;
+let platformUseDownscaleBlur = null;
+let platformBlurredSnapCache = null;
+
+function platformIsIOSWebKit() {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  let ua = navigator.userAgent;
+  let iOS =
+    /iPad|iPhone|iPod/.test(ua) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  return iOS && /WebKit/.test(ua);
+}
+
+function platformPrefersDownscaleBlur() {
+  if (platformUseDownscaleBlur !== null) {
+    return platformUseDownscaleBlur;
+  }
+  platformUseDownscaleBlur = platformIsIOSWebKit();
+  return platformUseDownscaleBlur;
+}
+
+function platformGetSnapshotCanvas(snap) {
+  if (!snap) {
+    return null;
+  }
+  return snap.canvas || snap.elt || snap;
+}
+
+function platformEnsureBlurScratch(w, h) {
+  if (!platformBlurScratchA) {
+    platformBlurScratchA = document.createElement("canvas");
+    platformBlurScratchB = document.createElement("canvas");
+  }
+  if (platformBlurScratchA.width !== w || platformBlurScratchA.height !== h) {
+    platformBlurScratchA.width = w;
+    platformBlurScratchA.height = h;
+    platformBlurScratchB.width = w;
+    platformBlurScratchB.height = h;
+  }
+  return { a: platformBlurScratchA, b: platformBlurScratchB };
+}
+
+function platformDownscaleBlurCanvas(sourceCanvas, blurPx) {
+  let w = platformW;
+  let h = platformH;
+  let passes = max(2, min(4, Math.round(blurPx / 5)));
+  let shrink = 0.42;
+  let { a, b } = platformEnsureBlurScratch(w, h);
+  let readCtx = a.getContext("2d");
+  let writeCtx = b.getContext("2d");
+  let sw = w;
+  let sh = h;
+
+  readCtx.clearRect(0, 0, w, h);
+  readCtx.imageSmoothingEnabled = true;
+  readCtx.imageSmoothingQuality = "high";
+  readCtx.drawImage(sourceCanvas, 0, 0, w, h);
+
+  for (let i = 0; i < passes; i++) {
+    sw = max(8, Math.round(sw * shrink));
+    sh = max(8, Math.round(sh * shrink));
+    writeCtx.clearRect(0, 0, w, h);
+    writeCtx.imageSmoothingEnabled = true;
+    writeCtx.imageSmoothingQuality = "high";
+    writeCtx.drawImage(a, 0, 0, sw, sh, 0, 0, w, h);
+    readCtx.clearRect(0, 0, w, h);
+    readCtx.imageSmoothingEnabled = true;
+    readCtx.imageSmoothingQuality = "high";
+    readCtx.drawImage(b, 0, 0, w, h);
+  }
+
+  return a;
+}
+
+function platformGetBlurredSnapshot(sourceSnap, blurPx) {
+  let sourceCanvas = platformGetSnapshotCanvas(sourceSnap);
+  if (!sourceCanvas) {
+    return null;
+  }
+  if (
+    platformBlurredSnapCache &&
+    platformBlurredSnapCache.source === sourceCanvas &&
+    platformBlurredSnapCache.blurPx === blurPx &&
+    platformBlurredSnapCache.frame === frameCount
+  ) {
+    return platformBlurredSnapCache.canvas;
+  }
+  let blurred = platformDownscaleBlurCanvas(sourceCanvas, blurPx);
+  platformBlurredSnapCache = {
+    source: sourceCanvas,
+    blurPx,
+    frame: frameCount,
+    canvas: blurred
+  };
+  return blurred;
+}
+
+function platformDrawBlurredSnapshot(ctx, sourceSnap, blurPx) {
+  let sourceCanvas = platformGetSnapshotCanvas(sourceSnap);
+  if (!sourceCanvas) {
+    return;
+  }
+  ctx.filter = "none";
+  if (platformPrefersDownscaleBlur()) {
+    ctx.drawImage(platformGetBlurredSnapshot(sourceSnap, blurPx), 0, 0, platformW, platformH);
+    return;
+  }
+  ctx.filter = `blur(${blurPx}px)`;
+  ctx.drawImage(sourceCanvas, 0, 0, platformW, platformH);
+  ctx.filter = "none";
+}
+
 function platformGetLoadingTriangleCy() {
   return platformLayoutY(420) + INTRO_TRIANGLES_OFFSET_Y + ms(25);
 }
@@ -1386,7 +1501,9 @@ function platformDrawMenuGlassCircle(baseSnap, cx, cy, r, hover = false, alpha =
 
   ctx.save();
   platformClipCircle(ctx, cx, cy, r);
-  ctx.filter = `blur(${ms(22)}px)`;
+  if (!platformPrefersDownscaleBlur()) {
+    ctx.filter = `blur(${ms(22)}px)`;
+  }
   ctx.fillStyle = `rgba(20, 16, 12, ${(hover ? 0.22 : 0.18) * a})`;
   ctx.fill();
   ctx.filter = "none";
@@ -1416,9 +1533,7 @@ function platformDrawMenuGlassCircle(baseSnap, cx, cy, r, hover = false, alpha =
     ctx.save();
     platformClipCircle(ctx, cx, cy, r);
     ctx.clip();
-    ctx.filter = `blur(${frostBlur}px)`;
-    ctx.drawImage(baseSnap.canvas, 0, 0, platformW, platformH);
-    ctx.filter = "none";
+    platformDrawBlurredSnapshot(ctx, baseSnap, frostBlur);
     ctx.fillStyle = `rgba(255, 255, 255, ${frostAlpha})`;
     ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
     ctx.restore();
