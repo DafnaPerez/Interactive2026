@@ -646,7 +646,6 @@ const platformAnimals = [
   {
     id: "eagle",
     color: "#5A4637",
-    introTriScale: PLATFORM_EAGLE_INTRO_TRI_SCALE,
     pts: [[78, 500], [150, 365], [255, 438]]
   },
   {
@@ -667,7 +666,6 @@ const platformAnimals = [
   {
     id: "deer",
     color: "#D8B788",
-    introTriScale: PLATFORM_DEER_INTRO_TRI_SCALE,
     pts: [[452, 495], [468, 330], [615, 525]]
   }
 ];
@@ -8271,7 +8269,7 @@ const POSTER_LAYOUT = {
   finalActionMenuNotchYRatio: 0.34,
   finalActionMenuNotchNudgeY: -ms(16),
   finalActionIconScale: 0.70,
-  finalActionWingIconScale: 0.90,
+  finalActionWingIconScale: 0.84,
   finalActionWingIconUpNudge: -ms(8),
   finalActionDockDownNudge: ms(10),
   finalActionDockShapeDownNudge: ms(8),
