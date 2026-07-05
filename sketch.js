@@ -404,6 +404,8 @@ const PLATFORM_LOADING_TRIANGLE_SIZE = mx(72);
 let platformBlurScratchA = null;
 let platformBlurScratchB = null;
 let platformPosterSnapshotScratch = null;
+let platformMenuBackdropSnap = null;
+let platformMenuBackdropSnapFrame = -1;
 let platformUseDownscaleBlur = null;
 let platformBlurredSnapCache = null;
 
@@ -426,18 +428,16 @@ function platformPrefersDownscaleBlur() {
   return platformUseDownscaleBlur;
 }
 
-function platformGetMainCanvasEl() {
-  if (typeof document === "undefined") {
-    return null;
-  }
-  return document.querySelector("main canvas");
+function platformClearPosterSnapshotCache() {
+  platformMenuBackdropSnap = null;
+  platformMenuBackdropSnapFrame = -1;
+  platformBlurredSnapCache = null;
 }
 
-function platformCapturePosterSnapshot() {
-  let cnv =
-    (typeof drawingContext !== "undefined" && drawingContext.canvas) ||
-    platformGetMainCanvasEl();
-  if (!cnv) {
+function platformCapturePosterSnapshotFromGet() {
+  let snap = get(0, 0, platformW, platformH);
+  let src = platformGetSnapshotCanvas(snap);
+  if (!src) {
     return null;
   }
   if (!platformPosterSnapshotScratch) {
@@ -453,15 +453,24 @@ function platformCapturePosterSnapshot() {
   ctx.clearRect(0, 0, platformW, platformH);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(cnv, 0, 0, cnv.width, cnv.height, 0, 0, platformW, platformH);
+  platformDrawSnapshotToCtx(ctx, src, platformW, platformH);
   return scratch;
 }
 
 function platformGetPosterSnapshot() {
-  if (platformPrefersDownscaleBlur()) {
-    return platformCapturePosterSnapshot();
+  if (
+    platformMenuBackdropSnap &&
+    platformMenuBackdropSnapFrame === frameCount
+  ) {
+    return platformMenuBackdropSnap;
   }
-  return get(0, 0, platformW, platformH);
+
+  let snap = platformPrefersDownscaleBlur()
+    ? platformCapturePosterSnapshotFromGet()
+    : get(0, 0, platformW, platformH);
+  platformMenuBackdropSnap = snap;
+  platformMenuBackdropSnapFrame = frameCount;
+  return snap;
 }
 
 function platformGetSnapshotCanvas(snap) {
@@ -912,6 +921,13 @@ function draw() {
     platformHideFinalDockBleed();
   } else if (platformAnimalMenuOpen) {
     platformDrawAnimalMenuOverlay();
+    let p = posterRegistry[platformMode];
+    if (p) {
+      let alpha = posterGetFinalAlpha(p);
+      if (alpha > 0) {
+        platformDrawFinalActionBar(p, alpha);
+      }
+    }
   } else if (platformIsCurrentPosterFinal()) {
     let p = posterRegistry[platformMode];
     if (p) {
@@ -1187,7 +1203,7 @@ function platformEnsureFinalDockBleedEl() {
   platformFinalDockBleedEl = document.createElement("div");
   platformFinalDockBleedEl.id = "platform-final-dock-bleed";
   platformFinalDockBleedEl.style.cssText =
-    "position:fixed;left:0;right:0;bottom:0;pointer-events:none;background:#ffffff;opacity:0;z-index:4;display:none;";
+    "position:fixed;left:0;right:0;bottom:0;pointer-events:none;background:#ffffff;opacity:0;z-index:1;display:none;";
   document.body.appendChild(platformFinalDockBleedEl);
   return platformFinalDockBleedEl;
 }
@@ -2217,6 +2233,7 @@ function platformOpenAnimalMenu() {
 function platformCloseAnimalMenu() {
   platformAnimalMenuOpen = false;
   platformAnimalMenuBoxes = null;
+  platformClearPosterSnapshotCache();
 }
 
 function platformSwitchToAnimal(animalId) {
@@ -2278,7 +2295,6 @@ function platformDrawAnimalMenuOverlay() {
     );
   }
 
-  platformDrawFinalActionBar(p, finalAlpha);
   pop();
 }
 
@@ -2987,6 +3003,9 @@ function platformDrawShareBackdrop(shadeAlpha, snap = null, maxY = null) {
   }
 
   let snapImg = snap || platformGetPosterSnapshot();
+  if (!platformGetSnapshotCanvas(snapImg)) {
+    return;
+  }
   let clipH = maxY != null ? maxY : platformH;
   let ctx = drawingContext;
   ctx.save();
@@ -4150,6 +4169,7 @@ function platformFitCanvasToScreen() {
   cnv.style.height = cssH + "px";
   cnv.style.display = "block";
   cnv.style.position = "fixed";
+  cnv.style.zIndex = "2";
   cnv.style.margin = "0";
   cnv.style.transform = "none";
 
