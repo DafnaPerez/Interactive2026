@@ -910,22 +910,177 @@ function platformGetFinalActionBarIconCenters() {
 }
 
 function platformGetFinalActionBarLayout(p) {
-  let barW = POSTER_LAYOUT.finalActionBarW;
-  let barH = POSTER_LAYOUT.finalActionBarH;
-  let barX = (platformW - barW) / 2;
-  let barY =
-    platformGetFinalContentBottom(p) +
-    POSTER_LAYOUT.finalCtaGap -
-    (barH - POSTER_LAYOUT.finalActionBarRefH) / 2;
-  let padX = POSTER_LAYOUT.finalActionBarPadX;
-  let slotW = (barW - padX * 2) / 3;
+  let dock = platformGetFinalActionDockLayout();
+  let hit = POSTER_LAYOUT.shareIconTouchSize;
+  let dipDepth = POSTER_LAYOUT.finalActionDockDipDepth;
+  let cx = dock.x + dock.w / 2;
+  let leftCx =
+    dock.x +
+    dock.w * POSTER_LAYOUT.finalActionHomeXRatio +
+    POSTER_LAYOUT.finalActionHomeXNudge;
+  let rightCx =
+    dock.x +
+    dock.w * POSTER_LAYOUT.finalActionShareXRatio +
+    POSTER_LAYOUT.finalActionShareXNudge;
+  let wingCy =
+    dock.y +
+    (dock.h + dipDepth) / 2 +
+    POSTER_LAYOUT.finalActionWingIconNudgeY;
+  let notchCy =
+    dock.y + dipDepth * POSTER_LAYOUT.finalActionMenuNotchYRatio;
+
+  function slotAt(x, y) {
+    return { x: x - hit / 2, y: y - hit / 2, w: hit, h: hit };
+  }
 
   return {
-    bar: { x: barX, y: barY, w: barW, h: barH },
-    home: { x: barX + padX, y: barY, w: slotW, h: barH },
-    share: { x: barX + padX + slotW, y: barY, w: slotW, h: barH },
-    menu: { x: barX + padX + slotW * 2, y: barY, w: slotW, h: barH }
+    bar: { x: dock.x, y: dock.y, w: dock.w, h: dock.h },
+    home: slotAt(leftCx, wingCy),
+    share: slotAt(rightCx, wingCy),
+    menu: slotAt(cx, notchCy)
   };
+}
+
+function platformGetFinalActionDockLayout() {
+  let dockH = POSTER_LAYOUT.finalActionDockH;
+  return {
+    x: 0,
+    y: platformH - dockH,
+    w: platformW,
+    h: dockH
+  };
+}
+
+function platformFinalActionDockPath(ctx, x, y, w, h) {
+  let cr = POSTER_LAYOUT.finalActionDockCornerR;
+  let cx = x + w / 2;
+  let dipHalfW = w * POSTER_LAYOUT.finalActionDockDipHalfWRatio;
+  let dipDepth = POSTER_LAYOUT.finalActionDockDipDepth;
+  let shoulder = dipHalfW * POSTER_LAYOUT.finalActionDockDipShoulder;
+
+  ctx.beginPath();
+  ctx.moveTo(x, y + h);
+  ctx.lineTo(x, y + cr);
+  ctx.quadraticCurveTo(x, y, x + cr, y);
+  ctx.lineTo(cx - dipHalfW, y);
+  ctx.bezierCurveTo(
+    cx - dipHalfW + shoulder, y,
+    cx - shoulder, y + dipDepth,
+    cx, y + dipDepth
+  );
+  ctx.bezierCurveTo(
+    cx + shoulder, y + dipDepth,
+    cx + dipHalfW - shoulder, y,
+    cx + dipHalfW, y
+  );
+  ctx.lineTo(x + w - cr, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + cr);
+  ctx.lineTo(x + w, y + h);
+  ctx.closePath();
+}
+
+function platformFillLiquidGlassDockInterior(ctx, bx, by, bw, bh, hover, a) {
+  let r = bh * 0.5;
+  let edgeCx = bx + bw / 2;
+  let edgeCy = by + bh / 2;
+
+  let innerShadow = ctx.createLinearGradient(
+    bx,
+    by,
+    bx + bw * 0.42,
+    by + bh * 0.72
+  );
+  innerShadow.addColorStop(0, `rgba(158, 150, 140, ${(hover ? 0.15 : 0.12) * a})`);
+  innerShadow.addColorStop(0.42, `rgba(210, 204, 196, ${(hover ? 0.07 : 0.05) * a})`);
+  innerShadow.addColorStop(1, "rgba(255, 255, 255, 0)");
+  ctx.fillStyle = innerShadow;
+  ctx.fillRect(bx, by, bw, bh);
+
+  let edgeShade = ctx.createRadialGradient(
+    edgeCx - r * 0.08,
+    edgeCy - r * 0.12,
+    r * 0.2,
+    edgeCx,
+    edgeCy,
+    max(bw, bh) * 0.52
+  );
+  edgeShade.addColorStop(0.7, "rgba(255, 255, 255, 0)");
+  edgeShade.addColorStop(0.9, `rgba(148, 140, 130, ${(hover ? 0.075 : 0.058) * a})`);
+  edgeShade.addColorStop(1, `rgba(132, 124, 114, ${(hover ? 0.115 : 0.09) * a})`);
+  ctx.fillStyle = edgeShade;
+  ctx.fillRect(bx, by, bw, bh);
+}
+
+function platformDrawFinalActionDockShapeShadow(dock, hover, a) {
+  let ctx = drawingContext;
+  let bx = dock.x;
+  let by = dock.y;
+  let bw = dock.w;
+  let bh = dock.h;
+
+  ctx.save();
+  ctx.filter = `blur(${ms(18)}px)`;
+  platformFinalActionDockPath(ctx, bx, by - ms(6), bw, bh);
+  ctx.fillStyle = `rgba(132, 124, 114, ${0.09 * a})`;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.filter = `blur(${ms(9)}px)`;
+  platformFinalActionDockPath(ctx, bx, by - ms(3), bw, bh);
+  ctx.fillStyle = `rgba(132, 124, 114, ${(hover ? 0.15 : 0.12) * a})`;
+  ctx.fill();
+  ctx.restore();
+}
+
+function platformDrawFinalActionDock(dock, hover = false, alpha = 255) {
+  let ctx = drawingContext;
+  let a = alpha / 255;
+  let bx = dock.x;
+  let by = dock.y;
+  let bw = dock.w;
+  let bh = dock.h;
+
+  platformDrawFinalActionDockShapeShadow(dock, hover, a);
+
+  ctx.save();
+  platformFinalActionDockPath(ctx, bx, by, bw, bh);
+  ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  platformFinalActionDockPath(ctx, bx, by, bw, bh);
+  ctx.clip();
+
+  platformFillLiquidGlassDockInterior(ctx, bx, by, bw, bh, hover, a);
+
+  let topSheen = ctx.createLinearGradient(bx, by, bx, by + bh * 0.52);
+  topSheen.addColorStop(0, `rgba(255, 255, 255, ${(hover ? 0.52 : 0.44) * a})`);
+  topSheen.addColorStop(0.38, `rgba(255, 255, 255, ${0.1 * a})`);
+  topSheen.addColorStop(1, "rgba(255, 255, 255, 0)");
+  ctx.fillStyle = topSheen;
+  ctx.fillRect(bx, by, bw, bh);
+
+  let bottomShade = ctx.createLinearGradient(bx, by + bh * 0.38, bx, by + bh);
+  bottomShade.addColorStop(0, "rgba(255, 255, 255, 0)");
+  bottomShade.addColorStop(0.65, `rgba(188, 182, 174, ${(hover ? 0.07 : 0.052) * a})`);
+  bottomShade.addColorStop(1, `rgba(132, 124, 114, ${(hover ? 0.17 : 0.14) * a})`);
+  ctx.fillStyle = bottomShade;
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.restore();
+
+  ctx.save();
+  platformFinalActionDockPath(ctx, bx, by, bw, bh);
+  let rim = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+  rim.addColorStop(0, `rgba(255, 255, 255, ${(hover ? 0.88 : 0.78) * a})`);
+  rim.addColorStop(0.32, `rgba(244, 240, 234, ${0.18 * a})`);
+  rim.addColorStop(0.68, `rgba(255, 255, 255, ${0.05 * a})`);
+  rim.addColorStop(1, `rgba(148, 140, 130, ${(hover ? 0.28 : 0.24) * a})`);
+  ctx.strokeStyle = rim;
+  ctx.lineWidth = ms(0.85);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function platformRoundRectPath(ctx, x, y, w, h, radius) {
@@ -1290,8 +1445,8 @@ function platformDrawFinalActionIntroTriangle(
 
 function platformDrawFinalActionBar(p, alpha) {
   let layout = platformGetFinalActionBarLayout(p);
+  let dock = platformGetFinalActionDockLayout();
   p.finalActionBoxes = layout;
-  let bar = layout.bar;
   let iconNudgeY = POSTER_LAYOUT.finalActionIconNudgeY;
   let iconMax =
     POSTER_LAYOUT.finalActionBarRefH * POSTER_LAYOUT.finalActionIconScale;
@@ -1310,14 +1465,7 @@ function platformDrawFinalActionBar(p, alpha) {
     }
   }
 
-  platformDrawLiquidGlassPill(
-    bar.x,
-    bar.y,
-    bar.w,
-    bar.h,
-    hoverKey !== null,
-    alpha
-  );
+  platformDrawFinalActionDock(dock, hoverKey !== null, alpha);
 
   for (let key of ["home", "share", "menu"]) {
     let box = layout[key];
@@ -1347,8 +1495,8 @@ function platformDrawFinalActionBar(p, alpha) {
           eagle,
           alpha,
           hoverKey === key,
-          iconNudgeY,
-          iconMax * 0.70,
+          POSTER_LAYOUT.finalActionMenuNotchNudgeY,
+          iconMax * 0.847,
           POSTER_LAYOUT.finalActionMenuIconNudgeX
         );
       }
@@ -7867,6 +8015,18 @@ const POSTER_LAYOUT = {
   finalActionBarH: ms(82),
   finalActionBarRefH: ms(68),
   finalActionBarPadX: ms(14),
+  finalActionDockH: ms(96) + ms(15),
+  finalActionDockCornerR: ms(16),
+  finalActionDockDipHalfWRatio: 0.22,
+  finalActionDockDipDepth: ms(60),
+  finalActionDockDipShoulder: 0.5,
+  finalActionHomeXRatio: 0.21,
+  finalActionShareXRatio: 0.79,
+  finalActionHomeXNudge: -ms(16),
+  finalActionShareXNudge: ms(16),
+  finalActionWingIconNudgeY: -ms(35),
+  finalActionMenuNotchYRatio: 0.34,
+  finalActionMenuNotchNudgeY: -ms(16),
   finalActionIconScale: 0.70,
   finalActionIconNudgeY: ms(4),
   finalActionMenuIconNudgeX: 2,
