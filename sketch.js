@@ -945,7 +945,7 @@ function platformGetFinalActionDockLayout() {
   let dockH = POSTER_LAYOUT.finalActionDockH;
   return {
     x: 0,
-    y: platformH - dockH,
+    y: platformLayoutY(REF_H) - dockH,
     w: platformW,
     h: dockH
   };
