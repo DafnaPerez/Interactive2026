@@ -101,6 +101,11 @@ const PLATFORM_LOADING_TOTAL_MS = 5000;
 const REF_W = 650;
 const REF_H = 975;
 
+const PLATFORM_EAGLE_ANIMAL_SCALE = 0.69 * 0.9;
+const PLATFORM_DEER_ANIMAL_SCALE = 0.92 * 0.9;
+const PLATFORM_EAGLE_INTRO_TRI_SCALE = 0.9;
+const PLATFORM_DEER_INTRO_TRI_SCALE = 0.9;
+
 // Standard phone portrait canvas
 const platformW = 390;
 const platformH = 844;
@@ -450,7 +455,7 @@ function platformGetSharePreviewTuning(animalId) {
   switch (animalId) {
     case "eagle":
       return {
-        scale: 0.54,
+        scale: 0.54 * 0.9,
         screenX: 0,
         screenY: -12,
         refX: -6,
@@ -469,7 +474,7 @@ function platformGetSharePreviewTuning(animalId) {
       };
     case "deer":
       return {
-        scale: 0.52,
+        scale: 0.52 * 0.9,
         screenX: 18,
         screenY: -28,
         refX: -102,
@@ -636,6 +641,7 @@ const platformAnimals = [
   {
     id: "eagle",
     color: "#5A4637",
+    introTriScale: PLATFORM_EAGLE_INTRO_TRI_SCALE,
     pts: [[78, 500], [150, 365], [255, 438]]
   },
   {
@@ -656,6 +662,7 @@ const platformAnimals = [
   {
     id: "deer",
     color: "#D8B788",
+    introTriScale: PLATFORM_DEER_INTRO_TRI_SCALE,
     pts: [[452, 495], [468, 330], [615, 525]]
   }
 ];
@@ -1966,7 +1973,7 @@ function platformGetIntroAnimal(id) {
 }
 
 function platformDrawMenuAnimalTriangle(animal, centerX, centerY, size, alpha = 255, fillHex = null) {
-  let pts = animal.pts;
+  let pts = platformGetIntroTriangleRefPts(animal);
   let cx0 = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
   let cy0 = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
   let maxR = 0;
@@ -3055,11 +3062,25 @@ function platformRotatePoint(px, py, cx, cy, ang) {
   return [cx + rx, cy + ry];
 }
 
+function platformGetIntroTriangleRefPts(animal) {
+  let scale = animal.introTriScale ?? 1;
+  if (scale === 1) {
+    return animal.pts;
+  }
+  let cx = (animal.pts[0][0] + animal.pts[1][0] + animal.pts[2][0]) / 3;
+  let cy = (animal.pts[0][1] + animal.pts[1][1] + animal.pts[2][1]) / 3;
+  return animal.pts.map((p) => [
+    cx + (p[0] - cx) * scale,
+    cy + (p[1] - cy) * scale
+  ]);
+}
+
 function platformGetAnimatedTrianglePoints(index) {
   let animal = platformAnimals[index];
-  let p0 = animal.pts[0];
-  let p1 = animal.pts[1];
-  let p2 = animal.pts[2];
+  let refPts = platformGetIntroTriangleRefPts(animal);
+  let p0 = refPts[0];
+  let p1 = refPts[1];
+  let p2 = refPts[2];
 
   let cx = (p0[0] + p1[0] + p2[0]) / 3;
   let cy = (p0[1] + p1[1] + p2[1]) / 3;
@@ -3377,7 +3398,7 @@ function platformGetLoadingStartIndex() {
 
 function platformGetLoadingTriangleRefPts(index) {
   let animal = platformAnimals[index];
-  return animal.pts.map((p) => [
+  return platformGetIntroTriangleRefPts(animal).map((p) => [
     mx(p[0]),
     platformLayoutY(p[1]) + INTRO_TRIANGLES_OFFSET_Y
   ]);
@@ -8336,7 +8357,7 @@ function posterCreateState(id, cfg) {
     jumpReadyTime: null,
     touchDevice: false,
     finalMotion: 0,
-    deer: { x: 30, y: -80, scale: 0.92, drawX: 30, drawY: -80 },
+    deer: { x: 30, y: -80, scale: PLATFORM_DEER_ANIMAL_SCALE, drawX: 30, drawY: -80 },
     hyena: { x: 26, y: -8, scale: 0.6, drawX: 26, drawY: -8 },
     wrongFallT: 0,
     wrongFallActive: false,
@@ -8623,7 +8644,7 @@ const posterRegistry = {
       drawTransform: {
         originX: ANIMAL_REF_W / 2 - 42,
         originY: 405,
-        scale: 0.69,
+        scale: PLATFORM_EAGLE_ANIMAL_SCALE,
         pivotX: 500,
         pivotY: 500
       },
@@ -8720,7 +8741,7 @@ const posterRegistry = {
       drawTransform: {
         originX: 30,
         originY: -80,
-        scale: 0.92,
+        scale: PLATFORM_DEER_ANIMAL_SCALE,
         pivotX: 0,
         pivotY: 0
       },
@@ -9056,7 +9077,7 @@ function posterReset(p) {
   p.finalActionBoxes = null;
   p.jumpReadyTime = null;
   p.finalMotion = 0;
-  p.deer = { x: 30, y: -80, scale: 0.92, drawX: 30, drawY: -80 };
+  p.deer = { x: 30, y: -80, scale: PLATFORM_DEER_ANIMAL_SCALE, drawX: 30, drawY: -80 };
   p.hyena = { x: 26, y: -8, scale: 0.6, drawX: 26, drawY: -8 };
   p.wrongFallT = 0;
   p.wrongFallActive = false;
@@ -9977,7 +9998,7 @@ function drawEagleAnimal() {
 
   vultureX = ANIMAL_REF_W / 2 - 42;
   vultureY = 405;
-  vultureScale = 0.69;
+  vultureScale = PLATFORM_EAGLE_ANIMAL_SCALE;
   vultureRot = 0;
   // Keep loose scatter pieces stable during assembly — perch motion only when fully built.
   floatIntensity = platformSharePreviewStill
@@ -10263,7 +10284,7 @@ function drawDeerAnimal() {
 
   p.deer.x = 30;
   p.deer.y = -80 + platformScreenPxToAnimalRefY(DEER_HYENA_EXTRA_SCREEN_OFFSET_Y);
-  p.deer.scale = 0.92;
+  p.deer.scale = PLATFORM_DEER_ANIMAL_SCALE;
 
   p.deer.drawX = p.deer.x + bodyX;
   p.deer.drawY = p.deer.y + bodyY;
