@@ -110,93 +110,10 @@ const platformH = 844;
 let platformScreenScale = 1;
 let platformScreenScaleX = 1;
 let platformScreenScaleY = 1;
-let platformDebugLayoutSig = "";
 let platformLastLayoutTighten = 1;
 let platformActivePosterQuestionNudgeY = 0;
 let platformSafeAreaProbe = null;
 let platformFinalDockBleedEl = null;
-
-function platformDebugLogLayout(runId) {
-  let vp = platformGetViewportSize();
-  let tighten = platformGetLayoutYTighten();
-  let cssW = platformW * platformScreenScaleX;
-  let cssH = platformH * platformScreenScaleY;
-  let sig =
-    vp.w +
-    "x" +
-    vp.h +
-    "@" +
-    platformScreenScaleX.toFixed(4) +
-    "x" +
-    platformScreenScaleY.toFixed(4) +
-    "t" +
-    tighten.toFixed(4);
-  if (sig === platformDebugLayoutSig) {
-    return;
-  }
-  platformDebugLayoutSig = sig;
-
-  // #region agent log
-  fetch(
-    "http://127.0.0.1:7772/ingest/d94715ef-8978-41e7-89f8-eab3e6be6d17",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "d1cd07"
-      },
-      body: JSON.stringify({
-        sessionId: "d1cd07",
-        location: "sketch.js:platformDebugLogLayout",
-        message: "viewport layout snapshot",
-        data: {
-          vpW: vp.w,
-          vpH: vp.h,
-          innerW: typeof window !== "undefined" ? window.innerWidth : null,
-          innerH: typeof window !== "undefined" ? window.innerHeight : null,
-          vvW:
-            typeof window !== "undefined" && window.visualViewport
-              ? window.visualViewport.width
-              : null,
-          vvH:
-            typeof window !== "undefined" && window.visualViewport
-              ? window.visualViewport.height
-              : null,
-          screenScale: platformScreenScale,
-          tighten,
-          canvasAspect: platformW / platformH,
-          vpAspect: vp.w / vp.h,
-          cssW,
-          cssH,
-          layoutMode: "width-fill-top-fit",
-          scaleX: platformScreenScaleX,
-          scaleY: platformScreenScaleY,
-          layoutTighten: platformGetLayoutYTighten(),
-          anchorMode: cssH > vp.h + 0.5 ? "top" : "center",
-          cropX: cssW - vp.w,
-          cropY: cssH - vp.h,
-          questionTitleY: platformText.questionTitle.y,
-          choiceY: POSTER_LAYOUT.choiceY,
-          headerLineY: POSTER_LAYOUT.headerLineY,
-          answerTop: POSTER_LAYOUT.answerTop,
-          footerTop: POSTER_LAYOUT.footerTop,
-          animalAnchorY: my(ANIMAL_ANCHOR_Y),
-          animalAnchorTuckedY: platformTuckRefY(ANIMAL_ANCHOR_Y),
-          mxRatio: platformW / REF_W,
-          myRatio: platformH / REF_H,
-          containScale: min(vp.w / platformW, vp.h / platformH),
-          coverScale: max(vp.w / platformW, vp.h / platformH),
-          userAgent:
-            typeof navigator !== "undefined" ? navigator.userAgent : null
-        },
-        timestamp: Date.now(),
-        runId: runId || "post-fix",
-        hypothesisId: "A-E"
-      })
-    }
-  ).catch(() => {});
-  // #endregion
-}
 
 function mx(x) {
   return x * platformW / REF_W;
@@ -397,184 +314,372 @@ function wrongFallGetPieceDrawOffset(p, index, cfg) {
 }
 const PLATFORM_SHARE_BACKDROP_DARKEN = 0.44;
 const PLATFORM_SHARE_BACKDROP_BLUR_PX = 18;
-const PLATFORM_SHARE_BACK_NUDGE_Y = ms(10);
-const PLATFORM_SHARE_ICONS_NUDGE_Y = ms(10);
-const PLATFORM_LOADING_TRIANGLE_SIZE = mx(72);
 
-let platformBlurScratchA = null;
-let platformBlurScratchB = null;
-let platformPosterSnapshotScratch = null;
-let platformMenuBackdropSnap = null;
-let platformMenuBackdropSnapFrame = -1;
-let platformUseDownscaleBlur = null;
-let platformBlurredSnapCache = null;
+let platformBlurScratchCanvas = null;
+let platformBlurDownCanvas = null;
+let platformBlurSnapCacheKey = "";
+let platformBlurSnapCache = null;
+let platformCanvasFilterWorks = null;
 
-function platformIsIOSWebKit() {
-  if (typeof navigator === "undefined") {
-    return false;
-  }
-  let ua = navigator.userAgent;
-  let iOS =
-    /iPad|iPhone|iPod/.test(ua) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-  return iOS && /WebKit/.test(ua);
-}
-
-function platformPrefersDownscaleBlur() {
-  if (platformUseDownscaleBlur !== null) {
-    return platformUseDownscaleBlur;
-  }
-  platformUseDownscaleBlur = platformIsIOSWebKit();
-  return platformUseDownscaleBlur;
-}
-
-function platformClearPosterSnapshotCache() {
-  platformMenuBackdropSnap = null;
-  platformMenuBackdropSnapFrame = -1;
-  platformBlurredSnapCache = null;
-}
-
-function platformCapturePosterSnapshotFromGet() {
-  let snap = get(0, 0, platformW, platformH);
-  let src = platformGetSnapshotCanvas(snap);
-  if (!src) {
-    return null;
-  }
-  if (!platformPosterSnapshotScratch) {
-    platformPosterSnapshotScratch = document.createElement("canvas");
-  }
-  let scratch = platformPosterSnapshotScratch;
-  if (scratch.width !== platformW || scratch.height !== platformH) {
-    scratch.width = platformW;
-    scratch.height = platformH;
-  }
-  let ctx = scratch.getContext("2d");
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, platformW, platformH);
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  platformDrawSnapshotToCtx(ctx, src, platformW, platformH);
-  return scratch;
-}
-
-function platformGetPosterSnapshot() {
-  if (
-    platformMenuBackdropSnap &&
-    platformMenuBackdropSnapFrame === frameCount
-  ) {
-    return platformMenuBackdropSnap;
-  }
-
-  let snap = platformPrefersDownscaleBlur()
-    ? platformCapturePosterSnapshotFromGet()
-    : get(0, 0, platformW, platformH);
-  platformMenuBackdropSnap = snap;
-  platformMenuBackdropSnapFrame = frameCount;
-  return snap;
-}
-
-function platformGetSnapshotCanvas(snap) {
+function platformGetSnapCanvas(snap) {
   if (!snap) {
     return null;
   }
   return snap.canvas || snap.elt || snap;
 }
 
-function platformDrawSnapshotToCtx(ctx, sourceCanvas, destW, destH) {
+function platformDetectCanvasFilterWorks() {
+  if (platformCanvasFilterWorks !== null) {
+    return platformCanvasFilterWorks;
+  }
+
+  try {
+    let src = document.createElement("canvas");
+    src.width = 32;
+    src.height = 32;
+    let sctx = src.getContext("2d");
+    sctx.fillStyle = "#000";
+    sctx.fillRect(0, 0, 32, 32);
+    sctx.fillStyle = "#fff";
+    sctx.fillRect(14, 14, 4, 4);
+
+    let dst = document.createElement("canvas");
+    dst.width = 32;
+    dst.height = 32;
+    let dctx = dst.getContext("2d");
+    if (!("filter" in dctx)) {
+      platformCanvasFilterWorks = false;
+      return false;
+    }
+
+    dctx.filter = "blur(4px)";
+    dctx.drawImage(src, 0, 0);
+    dctx.filter = "none";
+    let px = dctx.getImageData(15, 16, 1, 1).data;
+    platformCanvasFilterWorks = px[0] > 20 && px[0] < 235;
+  } catch (err) {
+    platformCanvasFilterWorks = false;
+  }
+
+  return platformCanvasFilterWorks;
+}
+
+function platformSampleCanvasDiff(sourceCanvas, blurredCanvas, sw, sh, refX, refY) {
+  let sx = Math.min(Math.max(Math.floor(refX * sw / platformW), 1), sw - 2);
+  let sy = Math.min(Math.max(Math.floor(refY * sh / platformH), 1), sh - 2);
+  let before = sourceCanvas.getContext("2d").getImageData(sx, sy, 1, 1).data;
+  let after = blurredCanvas.getContext("2d").getImageData(sx, sy, 1, 1).data;
+  return before[0] !== after[0] || before[1] !== after[1] || before[2] !== after[2];
+}
+
+function platformBoxBlurHorizontal(rgba, w, h, radius) {
+  let r = Math.max(1, Math.floor(radius));
+  let out = new Uint8ClampedArray(rgba.length);
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let outIdx = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        let sum = 0;
+        let count = 0;
+        for (let k = -r; k <= r; k++) {
+          let px = Math.min(Math.max(x + k, 0), w - 1);
+          sum += rgba[(y * w + px) * 4 + c];
+          count++;
+        }
+        out[outIdx + c] = (sum / count) | 0;
+      }
+      out[outIdx + 3] = rgba[outIdx + 3];
+    }
+  }
+
+  rgba.set(out);
+}
+
+function platformBoxBlurVertical(rgba, w, h, radius) {
+  let r = Math.max(1, Math.floor(radius));
+  let out = new Uint8ClampedArray(rgba.length);
+
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) {
+      let outIdx = (y * w + x) * 4;
+      for (let c = 0; c < 3; c++) {
+        let sum = 0;
+        let count = 0;
+        for (let k = -r; k <= r; k++) {
+          let py = Math.min(Math.max(y + k, 0), h - 1);
+          sum += rgba[(py * w + x) * 4 + c];
+          count++;
+        }
+        out[outIdx + c] = (sum / count) | 0;
+      }
+      out[outIdx + 3] = rgba[outIdx + 3];
+    }
+  }
+
+  rgba.set(out);
+}
+
+function platformManualBlurCanvasInto(sourceCanvas, destCanvas, blurPx) {
+  let sw = sourceCanvas.width;
+  let sh = sourceCanvas.height;
+  let scale = 0.38;
+  let dw = Math.max(1, Math.round(sw * scale));
+  let dh = Math.max(1, Math.round(sh * scale));
+
+  if (!platformBlurDownCanvas) {
+    platformBlurDownCanvas = document.createElement("canvas");
+  }
+  platformBlurDownCanvas.width = dw;
+  platformBlurDownCanvas.height = dh;
+
+  let dctx = platformBlurDownCanvas.getContext("2d");
+  dctx.clearRect(0, 0, dw, dh);
+  dctx.drawImage(sourceCanvas, 0, 0, dw, dh);
+
+  let imageData = dctx.getImageData(0, 0, dw, dh);
+  let radius = Math.max(1, Math.round((blurPx * scale * sw) / platformW / 1.6));
+  for (let i = 0; i < 3; i++) {
+    platformBoxBlurHorizontal(imageData.data, dw, dh, radius);
+    platformBoxBlurVertical(imageData.data, dw, dh, radius);
+  }
+  dctx.putImageData(imageData, 0, 0);
+
+  let sctx = destCanvas.getContext("2d");
+  sctx.clearRect(0, 0, sw, sh);
+  sctx.imageSmoothingEnabled = true;
+  sctx.imageSmoothingQuality = "high";
+  sctx.drawImage(platformBlurDownCanvas, 0, 0, dw, dh, 0, 0, sw, sh);
+}
+
+function platformPreferManualCanvasBlur() {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  return /iP(hone|od|ad)/.test(navigator.userAgent);
+}
+
+let platformMenuBackdropEl = null;
+let platformMenuOverlayGfx = null;
+
+function platformUseLiveDomMenuBackdrop() {
+  return platformPreferManualCanvasBlur();
+}
+
+function platformUseLiveDomBackdrop() {
+  return platformUseLiveDomMenuBackdrop();
+}
+
+function platformGetDrawCtx(gfx) {
+  return gfx ? gfx.drawingContext : drawingContext;
+}
+
+function platformGetLiveCanvasSnap() {
+  return { canvas: drawingContext.canvas };
+}
+
+function platformApplyFixedLayerLayout(el, zIndex) {
+  let cnv = document.querySelector("canvas");
+  if (!cnv || !el) {
+    return;
+  }
+
+  el.style.position = "fixed";
+  el.style.margin = "0";
+  el.style.transform = "none";
+  el.style.left = cnv.style.left;
+  el.style.top = cnv.style.top;
+  el.style.width = cnv.style.width;
+  el.style.height = cnv.style.height;
+  el.style.zIndex = String(zIndex);
+  el.style.pointerEvents = "none";
+}
+
+function platformEnsureMenuBackdropEl() {
+  if (!platformMenuBackdropEl && typeof document !== "undefined") {
+    let el = document.createElement("div");
+    el.id = "platform-menu-backdrop";
+    document.body.appendChild(el);
+    platformMenuBackdropEl = el;
+  }
+  return platformMenuBackdropEl;
+}
+
+function platformSyncMenuBackdropEl(shadeAlpha) {
+  let el = platformEnsureMenuBackdropEl();
+  if (!el) {
+    return;
+  }
+
+  platformApplyFixedLayerLayout(el, 3);
+  let blurPx = PLATFORM_SHARE_BACKDROP_BLUR_PX;
+  let shade = (shadeAlpha / 255) * PLATFORM_SHARE_BACKDROP_DARKEN;
+  el.style.display = "block";
+  el.style.backdropFilter = `blur(${blurPx}px)`;
+  el.style.webkitBackdropFilter = `blur(${blurPx}px)`;
+  el.style.backgroundColor = `rgba(${PLATFORM_TEXT_RGB[0]},${PLATFORM_TEXT_RGB[1]},${PLATFORM_TEXT_RGB[2]},${shade})`;
+}
+
+function platformEnsureMenuOverlayGfx() {
+  if (!platformMenuOverlayGfx) {
+    platformMenuOverlayGfx = createGraphics(platformW, platformH);
+    platformMenuOverlayGfx.pixelDensity(pixelDensity());
+    if (typeof document !== "undefined") {
+      document.body.appendChild(platformMenuOverlayGfx.elt);
+      platformMenuOverlayGfx.elt.style.pointerEvents = "none";
+    }
+  } else if (
+    platformMenuOverlayGfx.width !== platformW ||
+    platformMenuOverlayGfx.height !== platformH
+  ) {
+    platformMenuOverlayGfx.resizeCanvas(platformW, platformH);
+    platformMenuOverlayGfx.pixelDensity(pixelDensity());
+  }
+  platformApplyFixedLayerLayout(platformMenuOverlayGfx.elt, 4);
+  return platformMenuOverlayGfx;
+}
+
+function platformShowMenuOverlayLayers() {
+  let cnv = document.querySelector("canvas");
+  if (cnv) {
+    cnv.style.zIndex = "2";
+  }
+  if (platformMenuBackdropEl) {
+    platformMenuBackdropEl.style.display = "block";
+  }
+  if (platformMenuOverlayGfx) {
+    platformMenuOverlayGfx.elt.style.display = "block";
+  }
+}
+
+function platformHideMenuOverlayLayers() {
+  if (platformMenuBackdropEl) {
+    platformMenuBackdropEl.style.display = "none";
+  }
+  if (platformMenuOverlayGfx) {
+    platformMenuOverlayGfx.elt.style.display = "none";
+  }
+  let cnv = document.querySelector("canvas");
+  if (cnv) {
+    cnv.style.zIndex = "";
+  }
+}
+
+function platformCanvasBlurActuallyWorked(sourceCanvas, blurredCanvas, sw, sh) {
+  let refs = [
+    [0.5, 0.42],
+    [0.5, 0.58],
+    [0.34, 0.5],
+    [0.66, 0.5]
+  ];
+
+  for (let i = 0; i < refs.length; i++) {
+    if (
+      platformSampleCanvasDiff(
+        sourceCanvas,
+        blurredCanvas,
+        sw,
+        sh,
+        platformW * refs[i][0],
+        platformH * refs[i][1]
+      )
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function platformBlurCanvasSource(sourceCanvas, blurPx) {
+  if (!sourceCanvas || blurPx <= 0) {
+    return null;
+  }
+
+  let sw = sourceCanvas.width;
+  let sh = sourceCanvas.height;
+  if (!platformBlurScratchCanvas) {
+    platformBlurScratchCanvas = document.createElement("canvas");
+  }
+  if (
+    platformBlurScratchCanvas.width !== sw ||
+    platformBlurScratchCanvas.height !== sh
+  ) {
+    platformBlurScratchCanvas.width = sw;
+    platformBlurScratchCanvas.height = sh;
+  }
+
+  let sctx = platformBlurScratchCanvas.getContext("2d");
+  sctx.clearRect(0, 0, sw, sh);
+
+  if (platformPreferManualCanvasBlur()) {
+    platformManualBlurCanvasInto(sourceCanvas, platformBlurScratchCanvas, blurPx);
+  } else if (platformDetectCanvasFilterWorks()) {
+    sctx.filter = `blur(${blurPx}px)`;
+    sctx.drawImage(sourceCanvas, 0, 0, sw, sh);
+    sctx.filter = "none";
+    if (
+      !platformCanvasBlurActuallyWorked(
+        sourceCanvas,
+        platformBlurScratchCanvas,
+        sw,
+        sh
+      )
+    ) {
+      platformManualBlurCanvasInto(sourceCanvas, platformBlurScratchCanvas, blurPx);
+    }
+  } else {
+    platformManualBlurCanvasInto(sourceCanvas, platformBlurScratchCanvas, blurPx);
+  }
+
+  return platformBlurScratchCanvas;
+}
+
+function platformGetBlurredSnap(snap, blurPx) {
+  let sourceCanvas = platformGetSnapCanvas(snap);
+  if (!sourceCanvas) {
+    return null;
+  }
+
+  let cacheKey =
+    sourceCanvas.width +
+    "x" +
+    sourceCanvas.height +
+    "@" +
+    blurPx +
+    (platformAnimalMenuOpen || platformShareOpen ? "#f" + frameCount : "");
+  if (platformBlurSnapCacheKey === cacheKey && platformBlurSnapCache) {
+    return platformBlurSnapCache;
+  }
+
+  platformBlurSnapCache = platformBlurCanvasSource(sourceCanvas, blurPx);
+  platformBlurSnapCacheKey = cacheKey;
+  return platformBlurSnapCache;
+}
+
+function platformDrawBlurredSnapIntoRect(ctx, snap, blurred, x, y, w, h) {
+  let sourceCanvas = platformGetSnapCanvas(snap);
+  if (!sourceCanvas || !blurred) {
+    return false;
+  }
+
   ctx.drawImage(
-    sourceCanvas,
+    blurred,
     0,
     0,
     sourceCanvas.width,
     sourceCanvas.height,
-    0,
-    0,
-    destW,
-    destH
+    x,
+    y,
+    w,
+    h
   );
+  return true;
 }
 
-function platformEnsureBlurScratch(w, h) {
-  if (!platformBlurScratchA) {
-    platformBlurScratchA = document.createElement("canvas");
-    platformBlurScratchB = document.createElement("canvas");
-  }
-  if (platformBlurScratchA.width !== w || platformBlurScratchA.height !== h) {
-    platformBlurScratchA.width = w;
-    platformBlurScratchA.height = h;
-    platformBlurScratchB.width = w;
-    platformBlurScratchB.height = h;
-  }
-  return { a: platformBlurScratchA, b: platformBlurScratchB };
-}
-
-function platformDownscaleBlurCanvas(sourceCanvas, blurPx) {
-  let w = platformW;
-  let h = platformH;
-  let { a, b } = platformEnsureBlurScratch(w, h);
-  let readCtx = a.getContext("2d");
-  let writeCtx = b.getContext("2d");
-
-  readCtx.setTransform(1, 0, 0, 1, 0, 0);
-  writeCtx.setTransform(1, 0, 0, 1, 0, 0);
-  readCtx.clearRect(0, 0, w, h);
-  readCtx.imageSmoothingEnabled = true;
-  readCtx.imageSmoothingQuality = "high";
-  platformDrawSnapshotToCtx(readCtx, sourceCanvas, w, h);
-
-  let ratio = clamp(blurPx / 28, 0.24, 0.42);
-  let sw = max(16, Math.round(w * ratio));
-  let sh = max(16, Math.round(h * ratio));
-  writeCtx.clearRect(0, 0, w, h);
-  writeCtx.imageSmoothingEnabled = true;
-  writeCtx.imageSmoothingQuality = "high";
-  writeCtx.drawImage(a, 0, 0, sw, sh, 0, 0, w, h);
-
-  return b;
-}
-
-function platformGetBlurredSnapshot(sourceSnap, blurPx) {
-  let sourceCanvas = platformGetSnapshotCanvas(sourceSnap);
-  if (!sourceCanvas) {
-    return null;
-  }
-  if (
-    platformBlurredSnapCache &&
-    platformBlurredSnapCache.source === sourceCanvas &&
-    platformBlurredSnapCache.blurPx === blurPx &&
-    platformBlurredSnapCache.frame === frameCount
-  ) {
-    return platformBlurredSnapCache.canvas;
-  }
-  let blurred = platformDownscaleBlurCanvas(sourceCanvas, blurPx);
-  platformBlurredSnapCache = {
-    source: sourceCanvas,
-    blurPx,
-    frame: frameCount,
-    canvas: blurred
-  };
-  return blurred;
-}
-
-function platformDrawBlurredSnapshot(ctx, sourceSnap, blurPx) {
-  let sourceCanvas = platformGetSnapshotCanvas(sourceSnap);
-  if (!sourceCanvas) {
-    return;
-  }
-  ctx.filter = "none";
-  if (platformPrefersDownscaleBlur()) {
-    let blurred = platformGetBlurredSnapshot(sourceSnap, blurPx);
-    if (blurred) {
-      ctx.drawImage(blurred, 0, 0, platformW, platformH);
-    } else {
-      platformDrawSnapshotToCtx(ctx, sourceCanvas, platformW, platformH);
-    }
-    return;
-  }
-  ctx.filter = `blur(${blurPx}px)`;
-  platformDrawSnapshotToCtx(ctx, sourceCanvas, platformW, platformH);
-  ctx.filter = "none";
-}
+const PLATFORM_SHARE_BACK_NUDGE_Y = ms(10);
+const PLATFORM_SHARE_ICONS_NUDGE_Y = ms(10);
+const PLATFORM_LOADING_TRIANGLE_SIZE = mx(72);
 
 function platformGetLoadingTriangleCy() {
   return platformLayoutY(420) + INTRO_TRIANGLES_OFFSET_Y + ms(25);
@@ -916,18 +1021,14 @@ function draw() {
   if (platformShareOpen) {
     platformUpdateShareDragMotion();
   }
+  if (!platformAnimalMenuOpen && !platformShareOpen) {
+    platformHideMenuOverlayLayers();
+  }
   if (platformShareOpen) {
     platformDrawShareOverlay();
     platformHideFinalDockBleed();
   } else if (platformAnimalMenuOpen) {
     platformDrawAnimalMenuOverlay();
-    let p = posterRegistry[platformMode];
-    if (p) {
-      let alpha = posterGetFinalAlpha(p);
-      if (alpha > 0) {
-        platformDrawFinalActionBar(p, alpha);
-      }
-    }
   } else if (platformIsCurrentPosterFinal()) {
     let p = posterRegistry[platformMode];
     if (p) {
@@ -1203,7 +1304,7 @@ function platformEnsureFinalDockBleedEl() {
   platformFinalDockBleedEl = document.createElement("div");
   platformFinalDockBleedEl.id = "platform-final-dock-bleed";
   platformFinalDockBleedEl.style.cssText =
-    "position:fixed;left:0;right:0;bottom:0;pointer-events:none;background:#ffffff;opacity:0;z-index:1;display:none;";
+    "position:fixed;left:0;right:0;bottom:0;pointer-events:none;background:#ffffff;opacity:0;z-index:4;display:none;";
   document.body.appendChild(platformFinalDockBleedEl);
   return platformFinalDockBleedEl;
 }
@@ -1325,8 +1426,8 @@ function platformFillLiquidGlassDockInterior(ctx, bx, by, bw, bh, hover, a) {
   ctx.fillRect(bx, by, bw, bh);
 }
 
-function platformDrawFinalActionDockShapeShadow(dock, hover, a) {
-  let ctx = drawingContext;
+function platformDrawFinalActionDockShapeShadow(dock, hover, a, gfx = null) {
+  let ctx = platformGetDrawCtx(gfx);
   let bx = dock.x;
   let by = dock.y;
   let bw = dock.w;
@@ -1347,15 +1448,15 @@ function platformDrawFinalActionDockShapeShadow(dock, hover, a) {
   ctx.restore();
 }
 
-function platformDrawFinalActionDock(dock, hover = false, alpha = 255) {
-  let ctx = drawingContext;
+function platformDrawFinalActionDock(dock, hover = false, alpha = 255, gfx = null) {
+  let ctx = platformGetDrawCtx(gfx);
   let a = alpha / 255;
   let bx = dock.x;
   let by = dock.y;
   let bw = dock.w;
   let bh = dock.h;
 
-  platformDrawFinalActionDockShapeShadow(dock, hover, a);
+  platformDrawFinalActionDockShapeShadow(dock, hover, a, gfx);
 
   ctx.save();
   platformFinalActionDockPath(ctx, bx, by, bw, bh);
@@ -1396,10 +1497,10 @@ function platformDrawFinalActionDock(dock, hover = false, alpha = 255) {
   ctx.stroke();
   ctx.restore();
 
-  platformDrawFinalActionDockUnderbleed(dock, alpha);
+  platformDrawFinalActionDockUnderbleed(dock, alpha, gfx);
 }
 
-function platformDrawFinalActionDockUnderbleed(dock, alpha) {
+function platformDrawFinalActionDockUnderbleed(dock, alpha, gfx = null) {
   let extBottom = dock.bleedBottom;
   if (extBottom == null) {
     return;
@@ -1409,7 +1510,7 @@ function platformDrawFinalActionDockUnderbleed(dock, alpha) {
     return;
   }
 
-  let ctx = drawingContext;
+  let ctx = platformGetDrawCtx(gfx);
   let a = alpha / 255;
   ctx.save();
   ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
@@ -1560,17 +1661,23 @@ function platformFillLiquidGlassInterior(
 }
 
 // Frosted liquid-glass circle for overlays sitting on a blurred/darkened backdrop.
-function platformDrawMenuGlassCircle(baseSnap, cx, cy, r, hover = false, alpha = 255) {
-  let ctx = drawingContext;
+function platformDrawMenuGlassCircle(
+  baseSnap,
+  cx,
+  cy,
+  r,
+  hover = false,
+  alpha = 255,
+  gfx = null
+) {
+  let ctx = platformGetDrawCtx(gfx);
   let a = alpha / 255;
   let frostBlur = ms(15);
   let frostAlpha = (hover ? 0.34 : 0.28) * a;
 
   ctx.save();
   platformClipCircle(ctx, cx, cy, r);
-  if (!platformPrefersDownscaleBlur()) {
-    ctx.filter = `blur(${ms(22)}px)`;
-  }
+  ctx.filter = `blur(${ms(22)}px)`;
   ctx.fillStyle = `rgba(20, 16, 12, ${(hover ? 0.22 : 0.18) * a})`;
   ctx.fill();
   ctx.filter = "none";
@@ -1597,10 +1704,19 @@ function platformDrawMenuGlassCircle(baseSnap, cx, cy, r, hover = false, alpha =
   ctx.restore();
 
   if (baseSnap) {
+    let blurredFrost = platformGetBlurredSnap(baseSnap, frostBlur);
     ctx.save();
     platformClipCircle(ctx, cx, cy, r);
     ctx.clip();
-    platformDrawBlurredSnapshot(ctx, baseSnap, frostBlur);
+    platformDrawBlurredSnapIntoRect(
+      ctx,
+      baseSnap,
+      blurredFrost,
+      0,
+      0,
+      platformW,
+      platformH
+    );
     ctx.fillStyle = `rgba(255, 255, 255, ${frostAlpha})`;
     ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
     ctx.restore();
@@ -1853,7 +1969,8 @@ function platformDrawFinalActionIcon(
   hover,
   iconNudgeY = 0,
   maxSize,
-  brownTint = false
+  brownTint = false,
+  gfx = null
 ) {
   if (!img || img.width <= 0) {
     return;
@@ -1864,6 +1981,30 @@ function platformDrawFinalActionIcon(
   let drawH = aspect >= 1 ? maxSize / aspect : maxSize;
   let cx = box.x + box.w / 2;
   let cy = box.y + box.h / 2 + iconNudgeY;
+
+  if (gfx) {
+    gfx.push();
+    gfx.translate(cx, cy);
+    gfx.scale(hover ? 1.05 : 1);
+    gfx.imageMode(CENTER);
+    if (brownTint) {
+      gfx.tint(
+        PLATFORM_TEXT_RGB[0],
+        PLATFORM_TEXT_RGB[1],
+        PLATFORM_TEXT_RGB[2],
+        alpha
+      );
+    } else {
+      gfx.tint(255, alpha);
+    }
+    gfx.drawingContext.imageSmoothingEnabled = true;
+    gfx.drawingContext.imageSmoothingQuality = "high";
+    gfx.image(img, 0, 0, drawW, drawH);
+    gfx.noTint();
+    gfx.pop();
+    gfx.imageMode(CORNER);
+    return;
+  }
 
   push();
   translate(cx, cy);
@@ -1890,8 +2031,18 @@ function platformDrawFinalActionIntroTriangle(
   iconNudgeY,
   size,
   iconNudgeX = 0,
-  fillHex = PLATFORM_TEXT_COLOR
+  fillHex = PLATFORM_TEXT_COLOR,
+  gfx = null
 ) {
+  if (gfx) {
+    gfx.push();
+    gfx.translate(box.x + box.w / 2 + iconNudgeX, box.y + box.h / 2 + iconNudgeY);
+    gfx.scale(hover ? 1.05 : 1);
+    platformDrawMenuAnimalTriangle(animal, 0, 0, size, alpha, fillHex, gfx);
+    gfx.pop();
+    return;
+  }
+
   push();
   translate(box.x + box.w / 2 + iconNudgeX, box.y + box.h / 2 + iconNudgeY);
   scale(hover ? 1.05 : 1);
@@ -1904,7 +2055,7 @@ function platformGetCurrentAnimalTriangleColor() {
   return animal ? animal.color : PLATFORM_TEXT_COLOR;
 }
 
-function platformDrawFinalActionBar(p, alpha) {
+function platformDrawFinalActionBar(p, alpha, gfx = null) {
   let layout = platformGetFinalActionBarLayout(p);
   let dock = platformGetFinalActionDockLayout();
   p.finalActionBoxes = layout;
@@ -1926,7 +2077,7 @@ function platformDrawFinalActionBar(p, alpha) {
     }
   }
 
-  platformDrawFinalActionDock(dock, hoverKey !== null, alpha);
+  platformDrawFinalActionDock(dock, hoverKey !== null, alpha, gfx);
   platformUpdateFinalDockBleed(alpha, true);
 
   let wingIconMax =
@@ -1941,7 +2092,9 @@ function platformDrawFinalActionBar(p, alpha) {
         alpha,
         hoverKey === key,
         iconNudgeY,
-        wingIconMax
+        wingIconMax,
+        false,
+        gfx
       );
     } else if (key === "share") {
       platformDrawFinalActionIcon(
@@ -1950,7 +2103,9 @@ function platformDrawFinalActionBar(p, alpha) {
         alpha,
         hoverKey === key,
         iconNudgeY,
-        wingIconMax
+        wingIconMax,
+        false,
+        gfx
       );
     } else {
       let eagle = platformGetIntroAnimal("eagle");
@@ -1966,7 +2121,8 @@ function platformDrawFinalActionBar(p, alpha) {
           POSTER_LAYOUT.finalActionMenuNotchNudgeY,
           iconMax * 0.847,
           POSTER_LAYOUT.finalActionMenuIconNudgeX,
-          menuFill
+          menuFill,
+          gfx
         );
       }
     }
@@ -2099,6 +2255,7 @@ function platformCloseShare() {
   platformShareBoxes = null;
   platformSharePreviewStill = false;
   platformResetShareDragState();
+  platformHideMenuOverlayLayers();
 }
 
 function platformResetShareDragState() {
@@ -2157,7 +2314,15 @@ function platformGetIntroAnimal(id) {
   return null;
 }
 
-function platformDrawMenuAnimalTriangle(animal, centerX, centerY, size, alpha = 255, fillHex = null) {
+function platformDrawMenuAnimalTriangle(
+  animal,
+  centerX,
+  centerY,
+  size,
+  alpha = 255,
+  fillHex = null,
+  gfx = null
+) {
   let pts = platformGetIntroTriangleRefPts(animal);
   let cx0 = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
   let cy0 = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
@@ -2166,19 +2331,25 @@ function platformDrawMenuAnimalTriangle(animal, centerX, centerY, size, alpha = 
     maxR = max(maxR, dist(pt[0], pt[1], cx0, cy0));
   }
   let s = maxR > 0 ? size / maxR : 1;
-
-  noStroke();
   let triColor = color(fillHex || animal.color);
   triColor.setAlpha(alpha);
+  let x1 = centerX + (pts[0][0] - cx0) * s;
+  let y1 = centerY + (pts[0][1] - cy0) * s;
+  let x2 = centerX + (pts[1][0] - cx0) * s;
+  let y2 = centerY + (pts[1][1] - cy0) * s;
+  let x3 = centerX + (pts[2][0] - cx0) * s;
+  let y3 = centerY + (pts[2][1] - cy0) * s;
+
+  if (gfx) {
+    gfx.noStroke();
+    gfx.fill(triColor);
+    gfx.triangle(x1, y1, x2, y2, x3, y3);
+    return;
+  }
+
+  noStroke();
   fill(triColor);
-  triangle(
-    centerX + (pts[0][0] - cx0) * s,
-    centerY + (pts[0][1] - cy0) * s,
-    centerX + (pts[1][0] - cx0) * s,
-    centerY + (pts[1][1] - cy0) * s,
-    centerX + (pts[2][0] - cx0) * s,
-    centerY + (pts[2][1] - cy0) * s
-  );
+  triangle(x1, y1, x2, y2, x3, y3);
 }
 
 function platformGetAnimalMenuLayout(p) {
@@ -2233,7 +2404,7 @@ function platformOpenAnimalMenu() {
 function platformCloseAnimalMenu() {
   platformAnimalMenuOpen = false;
   platformAnimalMenuBoxes = null;
-  platformClearPosterSnapshotCache();
+  platformHideMenuOverlayLayers();
 }
 
 function platformSwitchToAnimal(animalId) {
@@ -2245,23 +2416,21 @@ function platformSwitchToAnimal(animalId) {
   platformEnterAnimal(animalId);
 }
 
-function platformDrawAnimalMenuOverlay() {
-  let p = posterRegistry[platformMode];
-  if (!p) {
-    return;
+function platformDrawAnimalMenuOverlayUi(
+  p,
+  layout,
+  finalAlpha,
+  motion,
+  shadeAlpha,
+  baseSnap,
+  gfx
+) {
+  if (baseSnap && shadeAlpha > 0) {
+    platformDrawShareBackdrop(shadeAlpha, baseSnap);
   }
 
-  let layout = platformGetAnimalMenuLayout(p);
-  platformAnimalMenuBoxes = layout;
-  let finalAlpha = posterGetFinalAlpha(p);
-  let motion = platformGetAnimalMenuPopoverMotion();
-  let shadeAlpha = motion.alpha * finalAlpha;
   let triSize = POSTER_LAYOUT.animalMenuTriSize;
   let staggerMs = POSTER_LAYOUT.animalMenuButtonStaggerMs;
-  let baseSnap = platformGetPosterSnapshot();
-
-  push();
-  platformDrawShareBackdrop(shadeAlpha, baseSnap);
 
   for (let i = 0; i < layout.buttons.length; i++) {
     let btn = layout.buttons[i];
@@ -2285,17 +2454,71 @@ function platformDrawAnimalMenuOverlay() {
     let btnAlpha = finalAlpha * staggerE;
     let drawR = (btn.w * btnScale) / 2;
 
-    platformDrawMenuGlassCircle(baseSnap, btn.cx, btnCy, drawR, hover, btnAlpha);
+    platformDrawMenuGlassCircle(
+      baseSnap,
+      btn.cx,
+      btnCy,
+      drawR,
+      hover,
+      btnAlpha,
+      gfx
+    );
     platformDrawMenuAnimalTriangle(
       btn.animal,
       btn.cx,
       btnCy,
       triSize * btnScale,
-      btnAlpha
+      btnAlpha,
+      null,
+      gfx
     );
   }
 
-  pop();
+  platformDrawFinalActionBar(p, finalAlpha, gfx);
+}
+
+function platformDrawAnimalMenuOverlay() {
+  let p = posterRegistry[platformMode];
+  if (!p) {
+    return;
+  }
+
+  let layout = platformGetAnimalMenuLayout(p);
+  platformAnimalMenuBoxes = layout;
+  let finalAlpha = posterGetFinalAlpha(p);
+  let motion = platformGetAnimalMenuPopoverMotion();
+  let shadeAlpha = motion.alpha * finalAlpha;
+  let useLiveBackdrop = platformUseLiveDomMenuBackdrop();
+
+  if (useLiveBackdrop) {
+    platformSyncMenuBackdropEl(shadeAlpha);
+    let gfx = platformEnsureMenuOverlayGfx();
+    gfx.clear();
+    platformShowMenuOverlayLayers();
+    platformDrawAnimalMenuOverlayUi(
+      p,
+      layout,
+      finalAlpha,
+      motion,
+      shadeAlpha,
+      null,
+      gfx
+    );
+  } else {
+    platformHideMenuOverlayLayers();
+    let baseSnap = platformGetLiveCanvasSnap();
+    push();
+    platformDrawAnimalMenuOverlayUi(
+      p,
+      layout,
+      finalAlpha,
+      motion,
+      shadeAlpha,
+      baseSnap,
+      null
+    );
+    pop();
+  }
 }
 
 function platformHandleAnimalMenuPress() {
@@ -2932,7 +3155,7 @@ function platformGetShareIconDrawDimensions(img, kind, drawR) {
   return { drawW, drawH };
 }
 
-function platformDrawShareOptionButton(box, alpha, hover, iconR) {
+function platformDrawShareOptionButton(box, alpha, hover, iconR, gfx = null) {
   let img = platformGetShareLogo(box.kind);
   if (!img || img.width <= 0 || img.height <= 0) {
     return;
@@ -2943,6 +3166,19 @@ function platformDrawShareOptionButton(box, alpha, hover, iconR) {
   let drawR = box.iconR ?? iconR;
   let dims = platformGetShareIconDrawDimensions(img, box.kind, drawR);
   let s = hover ? 1.05 : 1;
+
+  if (gfx) {
+    gfx.push();
+    gfx.imageMode(CENTER);
+    gfx.drawingContext.imageSmoothingEnabled = true;
+    gfx.drawingContext.imageSmoothingQuality = "high";
+    gfx.tint(255, alpha);
+    gfx.image(img, cx, cy, dims.drawW * s, dims.drawH * s);
+    gfx.noTint();
+    gfx.pop();
+    gfx.imageMode(CORNER);
+    return;
+  }
 
   push();
   imageMode(CENTER);
@@ -3002,25 +3238,33 @@ function platformDrawShareBackdrop(shadeAlpha, snap = null, maxY = null) {
     return;
   }
 
-  let snapImg = snap || platformGetPosterSnapshot();
-  if (!platformGetSnapshotCanvas(snapImg)) {
-    return;
-  }
+  let snapImg = snap || platformGetLiveCanvasSnap();
   let clipH = maxY != null ? maxY : platformH;
   let ctx = drawingContext;
+
+  let blurredBackdrop = platformGetBlurredSnap(snapImg, PLATFORM_SHARE_BACKDROP_BLUR_PX);
+
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, platformW, clipH);
   ctx.clip();
-  platformDrawBlurredSnapshot(ctx, snapImg, PLATFORM_SHARE_BACKDROP_BLUR_PX);
+  platformDrawBlurredSnapIntoRect(
+    ctx,
+    snapImg,
+    blurredBackdrop,
+    0,
+    0,
+    platformW,
+    platformH
+  );
   let shade = (shadeAlpha / 255) * PLATFORM_SHARE_BACKDROP_DARKEN;
   ctx.fillStyle = `rgba(${PLATFORM_TEXT_RGB[0]},${PLATFORM_TEXT_RGB[1]},${PLATFORM_TEXT_RGB[2]},${shade})`;
   ctx.fillRect(0, 0, platformW, clipH);
   ctx.restore();
 }
 
-function platformDrawShareSheetBackground(sheet) {
-  let ctx = drawingContext;
+function platformDrawShareSheetBackground(sheet, gfx = null) {
+  let ctx = platformGetDrawCtx(gfx);
   let r = POSTER_LAYOUT.shareSheetTopRadius;
 
   ctx.save();
@@ -3028,6 +3272,18 @@ function platformDrawShareSheetBackground(sheet) {
   platformRoundRectTopPath(ctx, sheet.x, sheet.y, sheet.w, sheet.h, r);
   ctx.fill();
   ctx.restore();
+
+  if (gfx) {
+    gfx.noFill();
+    gfx.stroke(228, 220, 210, 220);
+    gfx.strokeWeight(1);
+    ctx.save();
+    platformRoundRectTopPath(ctx, sheet.x + 0.5, sheet.y + 0.5, sheet.w - 1, sheet.h - 1, r);
+    ctx.stroke();
+    ctx.restore();
+    gfx.noStroke();
+    return;
+  }
 
   noFill();
   stroke(228, 220, 210, 220);
@@ -3040,7 +3296,7 @@ function platformDrawShareSheetBackground(sheet) {
   noStroke();
 }
 
-function platformDrawShareSheetGrabBar(sheet, alpha) {
+function platformDrawShareSheetGrabBar(sheet, alpha, gfx = null) {
   let grabW = POSTER_LAYOUT.shareSheetGrabW;
   let grabH = POSTER_LAYOUT.shareSheetGrabH;
   let cx = sheet.x + sheet.w / 2;
@@ -3050,6 +3306,16 @@ function platformDrawShareSheetGrabBar(sheet, alpha) {
     grabH / 2 +
     POSTER_LAYOUT.shareSheetGrabNudgeY +
     POSTER_LAYOUT.shareSheetContentNudgeY;
+
+  if (gfx) {
+    gfx.noStroke();
+    gfx.fill(188, 182, 174, alpha * 255);
+    gfx.rectMode(CENTER);
+    gfx.rect(cx, cy, grabW, grabH, grabH / 2);
+    gfx.rectMode(CORNER);
+    return;
+  }
+
   noStroke();
   fill(188, 182, 174, alpha * 255);
   rectMode(CENTER);
@@ -3079,9 +3345,24 @@ function platformDrawShareCardBackground(card) {
   noStroke();
 }
 
-function platformDrawAnimalPreviewInRect(p, rectBox) {
+function platformDrawAnimalPreviewInRect(p, rectBox, gfx = null) {
   let still = platformBakeSharePreviewStill(p);
   if (!still) {
+    return;
+  }
+
+  if (gfx) {
+    gfx.push();
+    let ctx = gfx.drawingContext;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(rectBox.x, rectBox.y, rectBox.w, rectBox.h);
+    ctx.clip();
+    gfx.imageMode(CORNER);
+    gfx.noTint();
+    gfx.image(still, rectBox.x, rectBox.y, rectBox.w, rectBox.h);
+    ctx.restore();
+    gfx.pop();
     return;
   }
 
@@ -3098,50 +3379,82 @@ function platformDrawAnimalPreviewInRect(p, rectBox) {
   pop();
 }
 
-function platformDrawShareOverlay() {
-  let p = posterRegistry[platformMode];
-  if (!p) {
-    return;
-  }
-
-  let layout = platformGetShareOverlayLayout(p);
-  platformShareBoxes = layout;
-  let motion = platformGetShareSheetMotion();
-  let shadeAlpha = motion.alpha * 255;
+function platformDrawShareOverlayUi(
+  p,
+  layout,
+  motion,
+  shadeAlpha,
+  baseSnap,
+  gfx
+) {
   let offsetY = motion.offsetY;
   let sheet = platformShareBoxWithMotion(layout.sheet, offsetY);
   let preview = platformShareBoxWithMotion(layout.preview, offsetY);
   let textTop = layout.textTop + offsetY;
   let copiedY = layout.copiedY + offsetY;
 
-  push();
-  rectMode(CORNER);
-  noStroke();
-  platformDrawShareBackdrop(shadeAlpha);
+  if (gfx) {
+    gfx.push();
+    gfx.rectMode(CORNER);
+    gfx.noStroke();
+  } else {
+    push();
+    rectMode(CORNER);
+    noStroke();
+  }
 
-  platformDrawShareSheetBackground(sheet);
-  platformDrawShareSheetGrabBar(sheet, motion.alpha);
+  if (baseSnap && shadeAlpha > 0) {
+    platformDrawShareBackdrop(shadeAlpha, baseSnap);
+  }
 
-  platformApplyGrungeFont(p.grungeFont);
-  let ink = color(PLATFORM_TEXT_COLOR);
-  fill(ink);
-  noStroke();
-  textAlign(CENTER, TOP);
-  textSize(layout.titleSize);
-  text(platformText.share.title, sheet.x + sheet.w / 2, textTop);
+  platformDrawShareSheetBackground(sheet, gfx);
+  platformDrawShareSheetGrabBar(sheet, motion.alpha, gfx);
 
-  ink.setAlpha(210);
-  fill(ink);
-  textSize(layout.bodySize);
-  platformDrawWrappedCenterText(
-    platformText.share.body,
-    sheet.x + sheet.w / 2,
-    textTop + layout.titleSize + layout.titleGap + layout.bodyNudgeY,
-    layout.bodyMaxW,
-    layout.bodyLeading
-  );
+  if (gfx) {
+    if (p.grungeFont) {
+      gfx.textFont(p.grungeFont);
+    }
+    let ink = gfx.color(PLATFORM_TEXT_COLOR);
+    gfx.fill(ink);
+    gfx.noStroke();
+    gfx.textAlign(CENTER, TOP);
+    gfx.textSize(layout.titleSize);
+    gfx.text(platformText.share.title, sheet.x + sheet.w / 2, textTop);
 
-  platformDrawAnimalPreviewInRect(p, preview);
+    ink.setAlpha(210);
+    gfx.fill(ink);
+    gfx.textSize(layout.bodySize);
+    platformDrawWrappedCenterText(
+      platformText.share.body,
+      sheet.x + sheet.w / 2,
+      textTop + layout.titleSize + layout.titleGap + layout.bodyNudgeY,
+      layout.bodyMaxW,
+      layout.bodyLeading,
+      1,
+      gfx
+    );
+  } else {
+    platformApplyGrungeFont(p.grungeFont);
+    let ink = color(PLATFORM_TEXT_COLOR);
+    fill(ink);
+    noStroke();
+    textAlign(CENTER, TOP);
+    textSize(layout.titleSize);
+    text(platformText.share.title, sheet.x + sheet.w / 2, textTop);
+
+    ink.setAlpha(210);
+    fill(ink);
+    textSize(layout.bodySize);
+    platformDrawWrappedCenterText(
+      platformText.share.body,
+      sheet.x + sheet.w / 2,
+      textTop + layout.titleSize + layout.titleGap + layout.bodyNudgeY,
+      layout.bodyMaxW,
+      layout.bodyLeading
+    );
+  }
+
+  platformDrawAnimalPreviewInRect(p, preview, gfx);
   platformSyncShareIconBoxes(layout, preview);
   platformShareBoxes = layout;
 
@@ -3154,18 +3467,69 @@ function platformDrawShareOverlay() {
       mouseX < box.x + box.w &&
       mouseY > box.y &&
       mouseY < box.y + box.h;
-    platformDrawShareOptionButton(box, 255, hover, layout.iconR);
+    platformDrawShareOptionButton(box, 255, hover, layout.iconR, gfx);
   }
-
-  platformApplyGrungeFont(p.grungeFont);
 
   if (millis() < platformShareCopiedUntil) {
-    fill(ink);
-    textAlign(CENTER, TOP);
-    textSize(ms(13));
-    text(platformShareCopiedMessage || platformText.share.copied, platformW / 2, copiedY);
+    if (gfx) {
+      if (p.grungeFont) {
+        gfx.textFont(p.grungeFont);
+      }
+      let ink = gfx.color(PLATFORM_TEXT_COLOR);
+      gfx.fill(ink);
+      gfx.textAlign(CENTER, TOP);
+      gfx.textSize(ms(13));
+      gfx.text(
+        platformShareCopiedMessage || platformText.share.copied,
+        platformW / 2,
+        copiedY
+      );
+    } else {
+      platformApplyGrungeFont(p.grungeFont);
+      let ink = color(PLATFORM_TEXT_COLOR);
+      fill(ink);
+      textAlign(CENTER, TOP);
+      textSize(ms(13));
+      text(platformShareCopiedMessage || platformText.share.copied, platformW / 2, copiedY);
+    }
   }
-  pop();
+
+  if (gfx) {
+    gfx.pop();
+  } else {
+    pop();
+  }
+}
+
+function platformDrawShareOverlay() {
+  let p = posterRegistry[platformMode];
+  if (!p) {
+    return;
+  }
+
+  let layout = platformGetShareOverlayLayout(p);
+  platformShareBoxes = layout;
+  let motion = platformGetShareSheetMotion();
+  let shadeAlpha = motion.alpha * 255;
+  let useLiveBackdrop = platformUseLiveDomBackdrop();
+
+  if (useLiveBackdrop) {
+    platformSyncMenuBackdropEl(shadeAlpha);
+    let g = platformEnsureMenuOverlayGfx();
+    g.clear();
+    platformShowMenuOverlayLayers();
+    platformDrawShareOverlayUi(p, layout, motion, shadeAlpha, null, g);
+  } else {
+    platformHideMenuOverlayLayers();
+    platformDrawShareOverlayUi(
+      p,
+      layout,
+      motion,
+      shadeAlpha,
+      platformGetLiveCanvasSnap(),
+      null
+    );
+  }
 }
 
 function platformHandleShareTap() {
@@ -4135,7 +4499,6 @@ function platformApplyViewportLayout() {
   }
 
   platformFitCanvasToScreen();
-  platformDebugLogLayout();
 }
 
 function platformBindViewportListeners() {
@@ -4169,7 +4532,6 @@ function platformFitCanvasToScreen() {
   cnv.style.height = cssH + "px";
   cnv.style.display = "block";
   cnv.style.position = "fixed";
-  cnv.style.zIndex = "2";
   cnv.style.margin = "0";
   cnv.style.transform = "none";
 
@@ -8260,7 +8622,9 @@ function platformDrawQuestionProgress(p) {
   pop();
 }
 
-function platformWrapTextLines(str, maxWidth, wordGapScale = 1) {
+function platformWrapTextLines(str, maxWidth, wordGapScale = 1, gfx = null) {
+  let measureText = (s) => (gfx ? gfx.textWidth(s) : textWidth(s));
+
   if (str.includes("\n")) {
     let allLines = [];
 
@@ -8270,7 +8634,7 @@ function platformWrapTextLines(str, maxWidth, wordGapScale = 1) {
         continue;
       }
       allLines = allLines.concat(
-        platformWrapTextLines(trimmed, maxWidth, wordGapScale)
+        platformWrapTextLines(trimmed, maxWidth, wordGapScale, gfx)
       );
     }
 
@@ -8286,11 +8650,11 @@ function platformWrapTextLines(str, maxWidth, wordGapScale = 1) {
       return 0;
     }
 
-    let spaceW = textWidth(" ") * wordGapScale;
+    let spaceW = measureText(" ") * wordGapScale;
     let w = 0;
 
     for (let i = 0; i < wordList.length; i++) {
-      w += textWidth(wordList[i]);
+      w += measureText(wordList[i]);
       if (i < wordList.length - 1) {
         w += spaceW;
       }
@@ -8333,7 +8697,24 @@ function platformWrapTextLines(str, maxWidth, wordGapScale = 1) {
   return lines;
 }
 
-function platformDrawWrappedCenterText(str, centerX, y, maxWidth, leading, wordGapScale = 1) {
+function platformDrawWrappedCenterText(
+  str,
+  centerX,
+  y,
+  maxWidth,
+  leading,
+  wordGapScale = 1,
+  gfx = null
+) {
+  if (gfx) {
+    gfx.textAlign(CENTER, TOP);
+    let lines = platformWrapTextLines(str, maxWidth, wordGapScale, gfx);
+    for (let i = 0; i < lines.length; i++) {
+      gfx.text(lines[i], centerX, y + i * leading);
+    }
+    return lines.length;
+  }
+
   textAlign(CENTER, TOP);
   let lines = platformWrapTextLines(str, maxWidth, wordGapScale);
 
