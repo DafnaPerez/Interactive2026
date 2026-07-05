@@ -411,6 +411,8 @@ function platformScreenPxToAnimalRefY(screenPx) {
   return screenPx * ANIMAL_REF_W / platformW;
 }
 
+const PLATFORM_EAGLE_FINAL_ORIGIN_Y = 405 - platformScreenPxToAnimalRefY(20);
+
 let platformTriangleDrawPass = 0;
 let platformSuppressAnimalPieceDraw = false;
 const platformAssembledDrawThreshold = 0.82;
