@@ -71,6 +71,21 @@ function platformHexToRgb(hex) {
   return [red(c), green(c), blue(c)];
 }
 
+function platformDesaturateRgb(rgb, amount = 0) {
+  if (amount <= 0) {
+    return rgb;
+  }
+
+  let [r, g, b] = rgb;
+  let lum = 0.299 * r + 0.587 * g + 0.114 * b;
+
+  return [
+    Math.round(lerp(r, lum, amount)),
+    Math.round(lerp(g, lum, amount)),
+    Math.round(lerp(b, lum, amount))
+  ];
+}
+
 function platformShareAnimFrame() {
   return platformSharePreviewStill ? platformShareFrozenFrame : frameCount;
 }
@@ -2224,6 +2239,9 @@ function platformProcessPosterChoiceImages() {
     }
 
     let rgb = platformHexToRgb(tintHex);
+    if (p.cfg.choiceImageDesaturate > 0) {
+      rgb = platformDesaturateRgb(rgb, p.cfg.choiceImageDesaturate);
+    }
     for (let key in imgs) {
       imgs[key] = platformRecolorLineArtImage(imgs[key], rgb);
     }
@@ -7857,10 +7875,10 @@ const POSTER_LAYOUT = {
   shareSheetIconR: ms(34),
   shareSheetIconDrawPad: ms(8),
   frameStrokeWeight: 0.9,
-  questionPhaseNudgeY: 10,
+  questionPhaseNudgeY: 0,
   questionPlayNudgeY: 20,
   choicePanelNudgeY: -8,
-  questionTitleNudgeY: -8,
+  questionTitleNudgeY: -12,
   progressHeaderNudgeX: 0,
   progressHeaderNudgeY: 10,
   progressGapBelowHeaderLine: ms(18),
@@ -8047,7 +8065,8 @@ const posterRegistry = {
     finalClickCount: 3,
     textColor: PLATFORM_TEXT_COLOR,
     choiceButtonColor: "#a3b57b",
-    choiceImageColor: PLATFORM_TEXT_COLOR,
+    choiceImageColor: "#424F34",
+    choiceImageDesaturate: 0.42,
     bgTop: "#EEF3DD",
     bgBottom: "#C6D7A7",
     glow: { r: 245, g: 238, b: 204, cy: my(400), maxR: mx(540), step: 18, maxA: 28, ws: 1.08, hs: 0.76 },
@@ -8146,7 +8165,8 @@ const posterRegistry = {
     finalClickCount: 3,
     textColor: PLATFORM_TEXT_COLOR,
     choiceButtonColor: "#c7aa89",
-    choiceImageColor: PLATFORM_TEXT_COLOR,
+    choiceImageColor: "#3F3128",
+    choiceImageDesaturate: 0.28,
     textRgb: PLATFORM_TEXT_RGB,
     bgTop: "#ECE9E1",
     bgBottom: "#DDBA90",
@@ -8353,7 +8373,7 @@ const posterRegistry = {
     textColor: PLATFORM_TEXT_COLOR,
     textRgb: PLATFORM_TEXT_RGB,
     choiceButtonColor: "#c1b783",
-    choiceImageColor: PLATFORM_TEXT_COLOR,
+    choiceImageColor: "#3F4636",
     headerTitle: "Pelobates syriacus",
     headerLeading: ms(18),
     finalFooter: { text: "Only a few populations\nremain in Israel" },
@@ -8459,7 +8479,7 @@ const posterRegistry = {
     textColor: PLATFORM_TEXT_COLOR,
     textRgb: PLATFORM_TEXT_RGB,
     choiceButtonColor: "#b4895d",
-    choiceImageColor: PLATFORM_TEXT_COLOR,
+    choiceImageColor: "#433A31",
     headerTitle: "Striped Hyena",
     headerLeading: ms(64),
     finalFooter: { text: "About 1,000 Striped\nHyenas left in Israel" },
