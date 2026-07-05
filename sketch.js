@@ -111,6 +111,7 @@ let platformDebugLayoutSig = "";
 let platformLastLayoutTighten = 1;
 let platformActivePosterQuestionNudgeY = 0;
 let platformSafeAreaProbe = null;
+let platformFinalDockBleedEl = null;
 
 function platformDebugLogLayout(runId) {
   let vp = platformGetViewportSize();
@@ -732,6 +733,7 @@ function draw() {
   }
   if (platformShareOpen) {
     platformDrawShareOverlay();
+    platformHideFinalDockBleed();
   } else if (platformAnimalMenuOpen) {
     platformDrawAnimalMenuOverlay();
   } else if (platformIsCurrentPosterFinal()) {
@@ -740,8 +742,12 @@ function draw() {
       let alpha = posterGetFinalAlpha(p);
       if (alpha > 0) {
         platformDrawFinalActionBar(p, alpha);
+      } else {
+        platformHideFinalDockBleed();
       }
     }
+  } else {
+    platformHideFinalDockBleed();
   }
 }
 
@@ -933,9 +939,12 @@ function platformGetFinalActionBarLayout(p) {
   let wingCy =
     dock.y +
     (dock.h + dipDepth) / 2 +
-    POSTER_LAYOUT.finalActionWingIconNudgeY;
+    POSTER_LAYOUT.finalActionWingIconNudgeY +
+    POSTER_LAYOUT.finalActionDockContentNudgeY;
   let notchCy =
-    dock.y + dipDepth * POSTER_LAYOUT.finalActionMenuNotchYRatio;
+    dock.y +
+    dipDepth * POSTER_LAYOUT.finalActionMenuNotchYRatio +
+    POSTER_LAYOUT.finalActionDockContentNudgeY;
 
   function slotAt(x, y) {
     return { x: x - hit / 2, y: y - hit / 2, w: hit, h: hit };
@@ -962,6 +971,19 @@ function platformGetSafeAreaInsetBottomPx() {
   return parseFloat(getComputedStyle(platformSafeAreaProbe).paddingBottom) || 0;
 }
 
+function platformGetViewportCanvasBottomY() {
+  let layoutBottom = platformLayoutY(REF_H);
+  if (typeof window === "undefined") {
+    return layoutBottom;
+  }
+  let scale = platformScreenScale || 1;
+  if (scale <= 0) {
+    return layoutBottom;
+  }
+  let vp = platformGetViewportSize();
+  return min(layoutBottom, vp.h / scale);
+}
+
 function platformGetVisibleCanvasBottomY() {
   let layoutBottom = platformLayoutY(REF_H);
   if (typeof window === "undefined") {
@@ -976,14 +998,73 @@ function platformGetVisibleCanvasBottomY() {
   return min(layoutBottom, visibleBottom);
 }
 
+function platformEnsureFinalDockBleedEl() {
+  if (platformFinalDockBleedEl) {
+    return platformFinalDockBleedEl;
+  }
+  if (typeof document === "undefined") {
+    return null;
+  }
+  platformFinalDockBleedEl = document.createElement("div");
+  platformFinalDockBleedEl.id = "platform-final-dock-bleed";
+  platformFinalDockBleedEl.style.cssText =
+    "position:fixed;left:0;right:0;bottom:0;pointer-events:none;background:#ffffff;opacity:0;z-index:4;display:none;";
+  document.body.appendChild(platformFinalDockBleedEl);
+  return platformFinalDockBleedEl;
+}
+
+function platformGetFinalDockBleedHeightPx() {
+  if (typeof window === "undefined") {
+    return 0;
+  }
+  if (window.visualViewport) {
+    let vv = window.visualViewport;
+    let vp = platformGetViewportSize();
+    return max(0, window.innerHeight - (vv.offsetTop + vp.h));
+  }
+  return platformGetSafeAreaInsetBottomPx();
+}
+
+function platformUpdateFinalDockBleed(alpha, visible) {
+  let el = platformEnsureFinalDockBleedEl();
+  if (!el) {
+    return;
+  }
+  if (!visible || alpha <= 0) {
+    el.style.display = "none";
+    el.style.opacity = "0";
+    return;
+  }
+  let bleedH = platformGetFinalDockBleedHeightPx();
+  if (bleedH <= 0.5) {
+    el.style.display = "none";
+    return;
+  }
+  el.style.display = "block";
+  el.style.height = bleedH + "px";
+  el.style.opacity = String(alpha / 255);
+}
+
+function platformHideFinalDockBleed() {
+  platformUpdateFinalDockBleed(0, false);
+}
+
 function platformGetFinalActionDockLayout() {
   let dockH = POSTER_LAYOUT.finalActionDockH;
-  let bottomY = platformGetVisibleCanvasBottomY();
+  let scale = max(platformScreenScale || 1, 0.001);
+  let screenBleed = platformGetFinalDockBleedHeightPx() / scale;
+  let bottomY = min(
+    platformGetViewportCanvasBottomY() +
+      POSTER_LAYOUT.finalActionDockDownNudge +
+      screenBleed,
+    platformH
+  );
   return {
     x: 0,
     y: bottomY - dockH,
     w: platformW,
-    h: dockH
+    h: dockH,
+    bleedBottom: bottomY
   };
 }
 
@@ -1116,6 +1197,26 @@ function platformDrawFinalActionDock(dock, hover = false, alpha = 255) {
   ctx.strokeStyle = rim;
   ctx.lineWidth = ms(0.85);
   ctx.stroke();
+  ctx.restore();
+
+  platformDrawFinalActionDockUnderbleed(dock, alpha);
+}
+
+function platformDrawFinalActionDockUnderbleed(dock, alpha) {
+  let extBottom = dock.bleedBottom;
+  if (extBottom == null) {
+    return;
+  }
+  let extTop = dock.y + dock.h;
+  if (extBottom <= extTop + 0.5) {
+    return;
+  }
+
+  let ctx = drawingContext;
+  let a = alpha / 255;
+  ctx.save();
+  ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+  ctx.fillRect(dock.x, extTop, dock.w, extBottom - extTop);
   ctx.restore();
 }
 
@@ -1629,6 +1730,10 @@ function platformDrawFinalActionBar(p, alpha) {
   }
 
   platformDrawFinalActionDock(dock, hoverKey !== null, alpha);
+  platformUpdateFinalDockBleed(alpha, true);
+
+  let wingIconMax =
+    iconMax * POSTER_LAYOUT.finalActionWingIconScale;
 
   for (let key of ["home", "share", "menu"]) {
     let box = layout[key];
@@ -1639,7 +1744,7 @@ function platformDrawFinalActionBar(p, alpha) {
         alpha,
         hoverKey === key,
         iconNudgeY,
-        iconMax
+        wingIconMax
       );
     } else if (key === "share") {
       platformDrawFinalActionIcon(
@@ -1648,7 +1753,7 @@ function platformDrawFinalActionBar(p, alpha) {
         alpha,
         hoverKey === key,
         iconNudgeY,
-        iconMax
+        wingIconMax
       );
     } else {
       let eagle = platformGetIntroAnimal("eagle");
@@ -8135,6 +8240,9 @@ const POSTER_LAYOUT = {
   finalActionMenuNotchYRatio: 0.34,
   finalActionMenuNotchNudgeY: -ms(16),
   finalActionIconScale: 0.70,
+  finalActionWingIconScale: 0.85,
+  finalActionDockDownNudge: ms(10),
+  finalActionDockContentNudgeY: ms(6),
   finalActionIconNudgeY: ms(4),
   finalActionMenuIconNudgeX: 2,
   animalMenuArcSpan: (Math.PI * 2) / 3,
