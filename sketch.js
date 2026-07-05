@@ -940,7 +940,8 @@ function platformGetFinalActionBarLayout(p) {
     dock.y +
     (dock.h + dipDepth) / 2 +
     POSTER_LAYOUT.finalActionWingIconNudgeY +
-    POSTER_LAYOUT.finalActionDockContentNudgeY;
+    POSTER_LAYOUT.finalActionDockContentNudgeY +
+    POSTER_LAYOUT.finalActionWingIconUpNudge;
   let notchCy =
     dock.y +
     dipDepth * POSTER_LAYOUT.finalActionMenuNotchYRatio +
@@ -8240,7 +8241,8 @@ const POSTER_LAYOUT = {
   finalActionMenuNotchYRatio: 0.34,
   finalActionMenuNotchNudgeY: -ms(16),
   finalActionIconScale: 0.70,
-  finalActionWingIconScale: 0.85,
+  finalActionWingIconScale: 0.90,
+  finalActionWingIconUpNudge: -ms(8),
   finalActionDockDownNudge: ms(10),
   finalActionDockContentNudgeY: ms(6),
   finalActionIconNudgeY: ms(4),
