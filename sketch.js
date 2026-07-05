@@ -1914,8 +1914,9 @@ function platformDrawAnimalMenuOverlay() {
 
   let layout = platformGetAnimalMenuLayout(p);
   platformAnimalMenuBoxes = layout;
+  let finalAlpha = posterGetFinalAlpha(p);
   let motion = platformGetAnimalMenuPopoverMotion();
-  let shadeAlpha = motion.alpha * 255;
+  let shadeAlpha = motion.alpha * finalAlpha;
   let triSize = POSTER_LAYOUT.animalMenuTriSize;
   let staggerMs = POSTER_LAYOUT.animalMenuButtonStaggerMs;
   let baseSnap = get(0, 0, platformW, platformH);
@@ -1942,7 +1943,7 @@ function platformDrawAnimalMenuOverlay() {
     );
     let staggerE = platformEaseOutCubic(staggerT);
     let btnScale = lerp(0.86, 1, staggerE) * motion.scale;
-    let btnAlpha = 255 * staggerE;
+    let btnAlpha = finalAlpha * staggerE;
     let drawR = (btn.w * btnScale) / 2;
 
     platformDrawMenuGlassCircle(baseSnap, btn.cx, btnCy, drawR, hover, btnAlpha);
@@ -1955,7 +1956,7 @@ function platformDrawAnimalMenuOverlay() {
     );
   }
 
-  platformDrawFinalActionBar(p, 255);
+  platformDrawFinalActionBar(p, finalAlpha);
   pop();
 }
 
@@ -9174,9 +9175,9 @@ function posterDrawQuestionUI(p) {
     let alpha = posterGetFinalAlpha(p);
     if (alpha > 0) {
       posterDrawFinalMessage(p, alpha);
-    }
-    if (!platformAnimalMenuOpen) {
-      platformDrawFinalActionBar(p, 255);
+      if (!platformAnimalMenuOpen) {
+        platformDrawFinalActionBar(p, alpha);
+      }
     }
     return;
   }
