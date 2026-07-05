@@ -110,6 +110,7 @@ let platformScreenScaleY = 1;
 let platformDebugLayoutSig = "";
 let platformLastLayoutTighten = 1;
 let platformActivePosterQuestionNudgeY = 0;
+let platformSafeAreaProbe = null;
 
 function platformDebugLogLayout(runId) {
   let vp = platformGetViewportSize();
@@ -731,9 +732,16 @@ function draw() {
   }
   if (platformShareOpen) {
     platformDrawShareOverlay();
-  }
-  if (platformAnimalMenuOpen) {
+  } else if (platformAnimalMenuOpen) {
     platformDrawAnimalMenuOverlay();
+  } else if (platformIsCurrentPosterFinal()) {
+    let p = posterRegistry[platformMode];
+    if (p) {
+      let alpha = posterGetFinalAlpha(p);
+      if (alpha > 0) {
+        platformDrawFinalActionBar(p, alpha);
+      }
+    }
   }
 }
 
@@ -941,11 +949,39 @@ function platformGetFinalActionBarLayout(p) {
   };
 }
 
+function platformGetSafeAreaInsetBottomPx() {
+  if (typeof document === "undefined") {
+    return 0;
+  }
+  if (!platformSafeAreaProbe) {
+    platformSafeAreaProbe = document.createElement("div");
+    platformSafeAreaProbe.style.cssText =
+      "position:fixed;left:0;bottom:0;visibility:hidden;pointer-events:none;height:0;padding-bottom:env(safe-area-inset-bottom, 0px)";
+    document.body.appendChild(platformSafeAreaProbe);
+  }
+  return parseFloat(getComputedStyle(platformSafeAreaProbe).paddingBottom) || 0;
+}
+
+function platformGetVisibleCanvasBottomY() {
+  let layoutBottom = platformLayoutY(REF_H);
+  if (typeof window === "undefined") {
+    return layoutBottom;
+  }
+  let scale = platformScreenScale || 1;
+  if (scale <= 0) {
+    return layoutBottom;
+  }
+  let vp = platformGetViewportSize();
+  let visibleBottom = vp.h / scale - platformGetSafeAreaInsetBottomPx() / scale;
+  return min(layoutBottom, visibleBottom);
+}
+
 function platformGetFinalActionDockLayout() {
   let dockH = POSTER_LAYOUT.finalActionDockH;
+  let bottomY = platformGetVisibleCanvasBottomY();
   return {
     x: 0,
-    y: platformLayoutY(REF_H) - dockH,
+    y: bottomY - dockH,
     w: platformW,
     h: dockH
   };
@@ -9175,9 +9211,6 @@ function posterDrawQuestionUI(p) {
     let alpha = posterGetFinalAlpha(p);
     if (alpha > 0) {
       posterDrawFinalMessage(p, alpha);
-      if (!platformAnimalMenuOpen) {
-        platformDrawFinalActionBar(p, alpha);
-      }
     }
     return;
   }
