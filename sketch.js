@@ -9175,6 +9175,9 @@ function posterDrawQuestionUI(p) {
     if (alpha > 0) {
       posterDrawFinalMessage(p, alpha);
     }
+    if (!platformAnimalMenuOpen) {
+      platformDrawFinalActionBar(p, 255);
+    }
     return;
   }
 
@@ -9289,9 +9292,6 @@ function posterDrawFinalMessage(p, alphaOverride = null) {
   textLeading(bodyLeading);
   textAlign(LEFT, TOP);
   text(cfg.finalBody.text, bodyX, bodyY);
-  if (!platformAnimalMenuOpen) {
-    platformDrawFinalActionBar(p, alpha);
-  }
 }
 
 function posterDrawFeedback(p) {
