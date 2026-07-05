@@ -2084,11 +2084,39 @@ function platformShareBoxWithMotion(box, offsetY) {
   };
 }
 
+function platformIsSamsungInternet() {
+  return (
+    typeof navigator !== "undefined" &&
+    /SamsungBrowser/i.test(navigator.userAgent)
+  );
+}
+
+function platformGetShareSheetNudgeY() {
+  let nudge = POSTER_LAYOUT.shareSheetNudgeY;
+  if (!platformIsSamsungInternet()) {
+    return nudge;
+  }
+
+  // Samsung Internet overlays a bottom toolbar that clips the sheet bleed.
+  // Lift the share overlay only — poster layout stays unchanged.
+  nudge -= ms(56);
+
+  if (typeof window !== "undefined" && window.visualViewport) {
+    let vv = window.visualViewport;
+    let bottomChromePx = max(0, window.innerHeight - vv.offsetTop - vv.height);
+    if (bottomChromePx > 0) {
+      nudge -= bottomChromePx * (platformW / vv.width);
+    }
+  }
+
+  return nudge;
+}
+
 function platformGetShareOverlayLayout(p) {
   let sheetH = platformGetShareSheetHeight();
   let sheetW = platformW;
   let sheetX = 0;
-  let sheetY = platformH - sheetH + POSTER_LAYOUT.shareSheetNudgeY;
+  let sheetY = platformH - sheetH + platformGetShareSheetNudgeY();
   let grabHitH = POSTER_LAYOUT.shareSheetGrabHitH;
   let pad = ms(20);
   let shareTouchSize = POSTER_LAYOUT.shareIconTouchSize;
