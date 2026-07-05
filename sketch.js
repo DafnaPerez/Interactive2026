@@ -403,6 +403,7 @@ const PLATFORM_LOADING_TRIANGLE_SIZE = mx(72);
 
 let platformBlurScratchA = null;
 let platformBlurScratchB = null;
+let platformPosterSnapshotScratch = null;
 let platformUseDownscaleBlur = null;
 let platformBlurredSnapCache = null;
 
@@ -425,11 +426,63 @@ function platformPrefersDownscaleBlur() {
   return platformUseDownscaleBlur;
 }
 
+function platformGetMainCanvasEl() {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  return document.querySelector("main canvas");
+}
+
+function platformCapturePosterSnapshot() {
+  let cnv =
+    (typeof drawingContext !== "undefined" && drawingContext.canvas) ||
+    platformGetMainCanvasEl();
+  if (!cnv) {
+    return null;
+  }
+  if (!platformPosterSnapshotScratch) {
+    platformPosterSnapshotScratch = document.createElement("canvas");
+  }
+  let scratch = platformPosterSnapshotScratch;
+  if (scratch.width !== platformW || scratch.height !== platformH) {
+    scratch.width = platformW;
+    scratch.height = platformH;
+  }
+  let ctx = scratch.getContext("2d");
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, platformW, platformH);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(cnv, 0, 0, cnv.width, cnv.height, 0, 0, platformW, platformH);
+  return scratch;
+}
+
+function platformGetPosterSnapshot() {
+  if (platformPrefersDownscaleBlur()) {
+    return platformCapturePosterSnapshot();
+  }
+  return get(0, 0, platformW, platformH);
+}
+
 function platformGetSnapshotCanvas(snap) {
   if (!snap) {
     return null;
   }
   return snap.canvas || snap.elt || snap;
+}
+
+function platformDrawSnapshotToCtx(ctx, sourceCanvas, destW, destH) {
+  ctx.drawImage(
+    sourceCanvas,
+    0,
+    0,
+    sourceCanvas.width,
+    sourceCanvas.height,
+    0,
+    0,
+    destW,
+    destH
+  );
 }
 
 function platformEnsureBlurScratch(w, h) {
@@ -449,33 +502,26 @@ function platformEnsureBlurScratch(w, h) {
 function platformDownscaleBlurCanvas(sourceCanvas, blurPx) {
   let w = platformW;
   let h = platformH;
-  let passes = max(2, min(4, Math.round(blurPx / 5)));
-  let shrink = 0.42;
   let { a, b } = platformEnsureBlurScratch(w, h);
   let readCtx = a.getContext("2d");
   let writeCtx = b.getContext("2d");
-  let sw = w;
-  let sh = h;
 
+  readCtx.setTransform(1, 0, 0, 1, 0, 0);
+  writeCtx.setTransform(1, 0, 0, 1, 0, 0);
   readCtx.clearRect(0, 0, w, h);
   readCtx.imageSmoothingEnabled = true;
   readCtx.imageSmoothingQuality = "high";
-  readCtx.drawImage(sourceCanvas, 0, 0, w, h);
+  platformDrawSnapshotToCtx(readCtx, sourceCanvas, w, h);
 
-  for (let i = 0; i < passes; i++) {
-    sw = max(8, Math.round(sw * shrink));
-    sh = max(8, Math.round(sh * shrink));
-    writeCtx.clearRect(0, 0, w, h);
-    writeCtx.imageSmoothingEnabled = true;
-    writeCtx.imageSmoothingQuality = "high";
-    writeCtx.drawImage(a, 0, 0, sw, sh, 0, 0, w, h);
-    readCtx.clearRect(0, 0, w, h);
-    readCtx.imageSmoothingEnabled = true;
-    readCtx.imageSmoothingQuality = "high";
-    readCtx.drawImage(b, 0, 0, w, h);
-  }
+  let ratio = clamp(blurPx / 28, 0.24, 0.42);
+  let sw = max(16, Math.round(w * ratio));
+  let sh = max(16, Math.round(h * ratio));
+  writeCtx.clearRect(0, 0, w, h);
+  writeCtx.imageSmoothingEnabled = true;
+  writeCtx.imageSmoothingQuality = "high";
+  writeCtx.drawImage(a, 0, 0, sw, sh, 0, 0, w, h);
 
-  return a;
+  return b;
 }
 
 function platformGetBlurredSnapshot(sourceSnap, blurPx) {
@@ -508,11 +554,16 @@ function platformDrawBlurredSnapshot(ctx, sourceSnap, blurPx) {
   }
   ctx.filter = "none";
   if (platformPrefersDownscaleBlur()) {
-    ctx.drawImage(platformGetBlurredSnapshot(sourceSnap, blurPx), 0, 0, platformW, platformH);
+    let blurred = platformGetBlurredSnapshot(sourceSnap, blurPx);
+    if (blurred) {
+      ctx.drawImage(blurred, 0, 0, platformW, platformH);
+    } else {
+      platformDrawSnapshotToCtx(ctx, sourceCanvas, platformW, platformH);
+    }
     return;
   }
   ctx.filter = `blur(${blurPx}px)`;
-  ctx.drawImage(sourceCanvas, 0, 0, platformW, platformH);
+  platformDrawSnapshotToCtx(ctx, sourceCanvas, platformW, platformH);
   ctx.filter = "none";
 }
 
@@ -2190,7 +2241,7 @@ function platformDrawAnimalMenuOverlay() {
   let shadeAlpha = motion.alpha * finalAlpha;
   let triSize = POSTER_LAYOUT.animalMenuTriSize;
   let staggerMs = POSTER_LAYOUT.animalMenuButtonStaggerMs;
-  let baseSnap = get(0, 0, platformW, platformH);
+  let baseSnap = platformGetPosterSnapshot();
 
   push();
   platformDrawShareBackdrop(shadeAlpha, baseSnap);
@@ -2935,16 +2986,14 @@ function platformDrawShareBackdrop(shadeAlpha, snap = null, maxY = null) {
     return;
   }
 
-  let snapImg = snap || get(0, 0, platformW, platformH);
+  let snapImg = snap || platformGetPosterSnapshot();
   let clipH = maxY != null ? maxY : platformH;
   let ctx = drawingContext;
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, 0, platformW, clipH);
   ctx.clip();
-  ctx.filter = `blur(${PLATFORM_SHARE_BACKDROP_BLUR_PX}px)`;
-  ctx.drawImage(snapImg.canvas, 0, 0, platformW, platformH);
-  ctx.filter = "none";
+  platformDrawBlurredSnapshot(ctx, snapImg, PLATFORM_SHARE_BACKDROP_BLUR_PX);
   let shade = (shadeAlpha / 255) * PLATFORM_SHARE_BACKDROP_DARKEN;
   ctx.fillStyle = `rgba(${PLATFORM_TEXT_RGB[0]},${PLATFORM_TEXT_RGB[1]},${PLATFORM_TEXT_RGB[2]},${shade})`;
   ctx.fillRect(0, 0, platformW, clipH);
