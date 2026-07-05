@@ -7875,7 +7875,7 @@ const POSTER_LAYOUT = {
   shareSheetIconR: ms(34),
   shareSheetIconDrawPad: ms(8),
   frameStrokeWeight: 0.9,
-  questionPhaseNudgeY: 0,
+  questionPhaseNudgeY: -10,
   questionPlayNudgeY: 20,
   choicePanelNudgeY: -8,
   questionTitleNudgeY: -12,
