@@ -102,7 +102,7 @@ const REF_W = 650;
 const REF_H = 975;
 
 const PLATFORM_EAGLE_ANIMAL_SCALE = 0.69 * 0.85;
-const PLATFORM_DEER_ANIMAL_SCALE = 0.92 * 0.85;
+const PLATFORM_DEER_ANIMAL_SCALE = 0.802;
 const PLATFORM_EAGLE_INTRO_TRI_SCALE = 0.85;
 const PLATFORM_DEER_INTRO_TRI_SCALE = 0.85;
 
@@ -455,7 +455,7 @@ function platformGetSharePreviewTuning(animalId) {
   switch (animalId) {
     case "eagle":
       return {
-        scale: 0.54 * 0.9,
+        scale: 0.54,
         screenX: 0,
         screenY: -12,
         refX: -6,
@@ -474,7 +474,7 @@ function platformGetSharePreviewTuning(animalId) {
       };
     case "deer":
       return {
-        scale: 0.52 * 0.9,
+        scale: 0.52,
         screenX: 18,
         screenY: -28,
         refX: -102,
