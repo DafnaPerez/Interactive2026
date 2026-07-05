@@ -8227,7 +8227,7 @@ const POSTER_LAYOUT = {
   headerBackNudgeX: ms(-14),
   headerNameNudgeX: ms(-12),
   headerNameNudgeY: ms(-8),
-  finalFooterNudgeY: ms(-85),
+  finalFooterNudgeY: ms(-95),
   headerBackNudgeY: ms(-2),
   headerNameSize: ms(20),
   finalMessageNudgeY: -80,
