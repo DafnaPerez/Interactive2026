@@ -8230,7 +8230,7 @@ const POSTER_LAYOUT = {
   finalFooterNudgeY: ms(-85),
   headerBackNudgeY: ms(-2),
   headerNameSize: ms(20),
-  finalMessageNudgeY: -60,
+  finalMessageNudgeY: -80,
   finalPosterNudgeY: ms(90),
   feedbackNudgeY: -25,
   choiceW: ms(147),
@@ -8752,8 +8752,8 @@ const posterRegistry = {
       pivot: { x: 345, y: 498 },
       scatter: { x: 0, y: 0 },
       drawTransform: {
-        originX: 30,
-        originY: -80,
+        originX: PLATFORM_DEER_FINAL_ORIGIN_X,
+        originY: PLATFORM_DEER_FINAL_ORIGIN_Y,
         scale: PLATFORM_DEER_ANIMAL_SCALE,
         pivotX: 0,
         pivotY: 0
@@ -9090,7 +9090,13 @@ function posterReset(p) {
   p.finalActionBoxes = null;
   p.jumpReadyTime = null;
   p.finalMotion = 0;
-  p.deer = { x: 30, y: -80, scale: PLATFORM_DEER_ANIMAL_SCALE, drawX: 30, drawY: -80 };
+  p.deer = {
+    x: PLATFORM_DEER_FINAL_ORIGIN_X,
+    y: PLATFORM_DEER_FINAL_ORIGIN_Y,
+    scale: PLATFORM_DEER_ANIMAL_SCALE,
+    drawX: PLATFORM_DEER_FINAL_ORIGIN_X,
+    drawY: PLATFORM_DEER_FINAL_ORIGIN_Y
+  };
   p.hyena = { x: 26, y: -8, scale: 0.6, drawX: 26, drawY: -8 };
   p.wrongFallT = 0;
   p.wrongFallActive = false;
@@ -10295,8 +10301,8 @@ function drawDeerAnimal() {
     sin(gait - 0.45) * 0.030 * movement +
     sin(gait * 2.0) * 0.006 * movement;
 
-  p.deer.x = 30;
-  p.deer.y = -80 + platformScreenPxToAnimalRefY(DEER_HYENA_EXTRA_SCREEN_OFFSET_Y);
+  p.deer.x = PLATFORM_DEER_FINAL_ORIGIN_X;
+  p.deer.y = PLATFORM_DEER_FINAL_ORIGIN_Y;
   p.deer.scale = PLATFORM_DEER_ANIMAL_SCALE;
 
   p.deer.drawX = p.deer.x + bodyX;
