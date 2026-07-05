@@ -390,8 +390,8 @@ function wrongFallGetPieceDrawOffset(p, index, cfg) {
     rot: wrongFallGetPieceRot(p, index)
   };
 }
-const PLATFORM_SHARE_BACKDROP_DARKEN = 0.82;
-const PLATFORM_SHARE_BACKDROP_BLUR_PX = 22;
+const PLATFORM_SHARE_BACKDROP_DARKEN = 0.44;
+const PLATFORM_SHARE_BACKDROP_BLUR_PX = 18;
 const PLATFORM_SHARE_BACK_NUDGE_Y = ms(10);
 const PLATFORM_SHARE_ICONS_NUDGE_Y = ms(10);
 const PLATFORM_LOADING_TRIANGLE_SIZE = mx(72);
@@ -1125,6 +1125,18 @@ function platformClipCircle(ctx, cx, cy, radius) {
   ctx.closePath();
 }
 
+function platformDrawSnapshotCircle(snap, cx, cy, radius) {
+  if (!snap) {
+    return;
+  }
+  let ctx = drawingContext;
+  ctx.save();
+  platformClipCircle(ctx, cx, cy, radius);
+  ctx.clip();
+  ctx.drawImage(snap.canvas, 0, 0, platformW, platformH);
+  ctx.restore();
+}
+
 const CHOICE_BUTTON_SCALE = 0.7;
 const CHOICE_IMAGE_SCALE = 0.9025;
 
@@ -1211,6 +1223,115 @@ function platformFillLiquidGlassInterior(
   spec.addColorStop(1, "rgba(255, 255, 255, 0)");
   ctx.fillStyle = spec;
   ctx.fillRect(bx, by, bw, bh);
+}
+
+// Frosted liquid-glass circle for overlays sitting on a blurred/darkened backdrop.
+function platformDrawMenuGlassCircle(baseSnap, cx, cy, r, hover = false, alpha = 255) {
+  let ctx = drawingContext;
+  let a = alpha / 255;
+  let frostBlur = ms(15);
+  let frostAlpha = (hover ? 0.34 : 0.28) * a;
+
+  ctx.save();
+  platformClipCircle(ctx, cx, cy, r);
+  ctx.filter = `blur(${ms(22)}px)`;
+  ctx.fillStyle = `rgba(20, 16, 12, ${(hover ? 0.22 : 0.18) * a})`;
+  ctx.fill();
+  ctx.filter = "none";
+  ctx.restore();
+
+  ctx.save();
+  platformClipCircle(ctx, cx, cy, r);
+  ctx.shadowColor = `rgba(20, 16, 12, ${(hover ? 0.42 : 0.34) * a})`;
+  ctx.shadowBlur = ms(hover ? 28 : 22);
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = ms(hover ? 9 : 7);
+  ctx.fillStyle = `rgba(255, 255, 255, ${0.001 * a})`;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  platformClipCircle(ctx, cx, cy, r - ms(1));
+  ctx.shadowColor = `rgba(30, 26, 22, ${(hover ? 0.28 : 0.22) * a})`;
+  ctx.shadowBlur = ms(hover ? 12 : 10);
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = ms(hover ? 4 : 3);
+  ctx.fillStyle = `rgba(255, 255, 255, ${0.001 * a})`;
+  ctx.fill();
+  ctx.restore();
+
+  if (baseSnap) {
+    ctx.save();
+    platformClipCircle(ctx, cx, cy, r);
+    ctx.clip();
+    ctx.filter = `blur(${frostBlur}px)`;
+    ctx.drawImage(baseSnap.canvas, 0, 0, platformW, platformH);
+    ctx.filter = "none";
+    ctx.fillStyle = `rgba(255, 255, 255, ${frostAlpha})`;
+    ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+    ctx.restore();
+  }
+
+  ctx.save();
+  platformClipCircle(ctx, cx, cy, r - 0.5);
+  ctx.clip();
+
+  ctx.fillStyle = `rgba(255, 255, 255, ${(hover ? 0.94 : 0.9) * a})`;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+  platformFillLiquidGlassInterior(
+    ctx,
+    cx - r,
+    cy - r,
+    r * 2,
+    r * 2,
+    cx,
+    cy,
+    r,
+    hover,
+    a,
+    1
+  );
+
+  let topInnerShadow = ctx.createLinearGradient(
+    cx - r * 0.82,
+    cy - r * 0.9,
+    cx + r * 0.35,
+    cy + r * 0.45
+  );
+  topInnerShadow.addColorStop(0, `rgba(120, 112, 102, ${(hover ? 0.3 : 0.24) * a})`);
+  topInnerShadow.addColorStop(0.22, `rgba(148, 140, 130, ${(hover ? 0.16 : 0.12) * a})`);
+  topInnerShadow.addColorStop(0.5, `rgba(188, 182, 174, ${(hover ? 0.05 : 0.03) * a})`);
+  topInnerShadow.addColorStop(0.72, "rgba(255, 255, 255, 0)");
+  ctx.fillStyle = topInnerShadow;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+  let topArcShadow = ctx.createLinearGradient(cx, cy - r, cx, cy + r * 0.2);
+  topArcShadow.addColorStop(0, `rgba(110, 102, 94, ${(hover ? 0.18 : 0.14) * a})`);
+  topArcShadow.addColorStop(0.45, `rgba(158, 150, 140, ${(hover ? 0.06 : 0.04) * a})`);
+  topArcShadow.addColorStop(1, "rgba(255, 255, 255, 0)");
+  ctx.fillStyle = topArcShadow;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+  let bottomDepth = ctx.createLinearGradient(cx, cy + r * 0.15, cx, cy + r);
+  bottomDepth.addColorStop(0, "rgba(255, 255, 255, 0)");
+  bottomDepth.addColorStop(0.55, `rgba(120, 112, 102, ${(hover ? 0.06 : 0.04) * a})`);
+  bottomDepth.addColorStop(1, `rgba(90, 82, 74, ${(hover ? 0.14 : 0.1) * a})`);
+  ctx.fillStyle = bottomDepth;
+  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  ctx.restore();
+
+  ctx.save();
+  platformClipCircle(ctx, cx, cy, r - ms(0.45));
+  let rim = ctx.createLinearGradient(cx - r, cy - r, cx + r * 0.22, cy + r);
+  rim.addColorStop(0, `rgba(255, 255, 255, ${(hover ? 0.78 : 0.68) * a})`);
+  rim.addColorStop(0.32, `rgba(244, 240, 234, ${0.1 * a})`);
+  rim.addColorStop(0.68, `rgba(255, 255, 255, ${0.02 * a})`);
+  rim.addColorStop(1, `rgba(148, 140, 130, ${(hover ? 0.18 : 0.14) * a})`);
+  ctx.strokeStyle = rim;
+  ctx.lineWidth = ms(0.85);
+  ctx.stroke();
+  ctx.restore();
 }
 
 // Figma ref: Button - Liquid Glass - Symbol, 126×126 circle (ms(210) at 390w).
@@ -1434,13 +1555,19 @@ function platformDrawFinalActionIntroTriangle(
   hover,
   iconNudgeY,
   size,
-  iconNudgeX = 0
+  iconNudgeX = 0,
+  fillHex = PLATFORM_TEXT_COLOR
 ) {
   push();
   translate(box.x + box.w / 2 + iconNudgeX, box.y + box.h / 2 + iconNudgeY);
   scale(hover ? 1.05 : 1);
-  platformDrawMenuAnimalTriangle(animal, 0, 0, size, alpha, PLATFORM_TEXT_COLOR);
+  platformDrawMenuAnimalTriangle(animal, 0, 0, size, alpha, fillHex);
   pop();
+}
+
+function platformGetCurrentAnimalTriangleColor() {
+  let animal = platformGetIntroAnimal(platformMode);
+  return animal ? animal.color : PLATFORM_TEXT_COLOR;
 }
 
 function platformDrawFinalActionBar(p, alpha) {
@@ -1490,6 +1617,9 @@ function platformDrawFinalActionBar(p, alpha) {
     } else {
       let eagle = platformGetIntroAnimal("eagle");
       if (eagle) {
+        let menuFill = platformAnimalMenuOpen
+          ? platformGetCurrentAnimalTriangleColor()
+          : PLATFORM_TEXT_COLOR;
         platformDrawFinalActionIntroTriangle(
           box,
           eagle,
@@ -1497,7 +1627,8 @@ function platformDrawFinalActionBar(p, alpha) {
           hoverKey === key,
           POSTER_LAYOUT.finalActionMenuNotchNudgeY,
           iconMax * 0.847,
-          POSTER_LAYOUT.finalActionMenuIconNudgeX
+          POSTER_LAYOUT.finalActionMenuIconNudgeX,
+          menuFill
         );
       }
     }
@@ -1643,10 +1774,6 @@ function platformResetShareDragState() {
   platformShareDragClosing = false;
 }
 
-function platformFormatAnimalMenuLabel(animalId) {
-  return animalId.charAt(0).toUpperCase() + animalId.slice(1);
-}
-
 function platformGetAnimalMenuEntries() {
   let entries = [];
   for (let i = 0; i < platformAnimals.length; i++) {
@@ -1656,7 +1783,6 @@ function platformGetAnimalMenuEntries() {
     }
     entries.push({
       id: animal.id,
-      label: platformFormatAnimalMenuLabel(animal.id),
       animal
     });
   }
@@ -1721,39 +1847,41 @@ function platformGetAnimalMenuLayout(p) {
   let entries = platformGetAnimalMenuEntries();
   let actionBar = platformGetFinalActionBarLayout(p);
   let anchor = actionBar.menu;
-  let rowH = POSTER_LAYOUT.animalMenuRowH;
-  let rowGap = POSTER_LAYOUT.animalMenuRowGap;
-  let pad = ms(12);
-  let cardW = ms(148);
-  let cardH =
-    pad * 2 + entries.length * rowH + max(0, entries.length - 1) * rowGap;
-  let gapAbove = ms(8);
-  let cardX = anchor.x + anchor.w / 2 - cardW / 2;
-  let cardY = anchor.y - cardH - gapAbove;
+  let anchorCx = anchor.x + anchor.w / 2;
+  let anchorCy = anchor.y + anchor.h / 2;
+  let btnSize = POSTER_LAYOUT.choiceBtnSize * POSTER_LAYOUT.animalMenuCircleScale;
+  let gap = POSTER_LAYOUT.animalMenuCircleGap;
+  let arcSpan = POSTER_LAYOUT.animalMenuArcSpan;
+  let count = entries.length;
+  let step = count > 1 ? arcSpan / (count - 1) : 0;
+  let minRadius =
+    count > 1 && step > 0
+      ? (btnSize + gap) / (2 * sin(step / 2))
+      : POSTER_LAYOUT.animalMenuArcRadiusMin;
+  let radius = max(POSTER_LAYOUT.animalMenuArcRadiusMin, minRadius);
+  let centerA = -PI / 2;
+  let startA = centerA - arcSpan / 2;
+  let endA = centerA + arcSpan / 2;
 
-  cardX = constrain(cardX, ms(10), platformW - cardW - ms(10));
-  cardY = max(ms(12), cardY);
-
-  let rows = [];
-  for (let i = 0; i < entries.length; i++) {
-    rows.push({
+  let buttons = [];
+  for (let i = 0; i < count; i++) {
+    let t = count === 1 ? 0.5 : i / (count - 1);
+    let a = lerp(startA, endA, t);
+    let cx = anchorCx + cos(a) * radius;
+    let cy = anchorCy + sin(a) * radius;
+    buttons.push({
       id: entries[i].id,
-      label: entries[i].label,
       animal: entries[i].animal,
-      x: cardX + pad,
-      y: cardY + pad + i * (rowH + rowGap),
-      w: cardW - pad * 2,
-      h: rowH
+      x: cx - btnSize / 2,
+      y: cy - btnSize / 2,
+      w: btnSize,
+      h: btnSize,
+      cx,
+      cy
     });
   }
 
-  return {
-    card: { x: cardX, y: cardY, w: cardW, h: cardH },
-    anchor,
-    pad,
-    rowH,
-    rows
-  };
+  return { anchor, buttons };
 }
 
 function platformOpenAnimalMenu() {
@@ -1778,34 +1906,6 @@ function platformSwitchToAnimal(animalId) {
   platformEnterAnimal(animalId);
 }
 
-function platformDrawAnimalMenuBackdrop(shadeAlpha) {
-  if (shadeAlpha <= 0) {
-    return;
-  }
-  let a = (shadeAlpha / 255) * 0.08;
-  noStroke();
-  fill(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], a * 255);
-  rect(0, 0, platformW, platformH);
-}
-
-function platformDrawAnimalMenuPopoverPointer(card, anchor, alpha) {
-  let tipX = constrain(
-    anchor.x + anchor.w / 2,
-    card.x + ms(18),
-    card.x + card.w - ms(18)
-  );
-  let tipY = card.y + card.h + ms(1);
-  let halfW = ms(7);
-  let h = ms(6);
-  fill(255, alpha);
-  noStroke();
-  triangle(tipX, tipY + h, tipX - halfW, tipY, tipX + halfW, tipY);
-  stroke(220, 210, 196, alpha * 0.9);
-  strokeWeight(1);
-  line(tipX - halfW, tipY, tipX + halfW, tipY);
-  noStroke();
-}
-
 function platformDrawAnimalMenuOverlay() {
   let p = posterRegistry[platformMode];
   if (!p) {
@@ -1816,68 +1916,46 @@ function platformDrawAnimalMenuOverlay() {
   platformAnimalMenuBoxes = layout;
   let motion = platformGetAnimalMenuPopoverMotion();
   let shadeAlpha = motion.alpha * 255;
-  let card = layout.card;
-  let anchor = layout.anchor;
-  let popoverCX = card.x + card.w / 2;
-  let popoverCY = card.y + card.h / 2 + motion.offsetY;
+  let triSize = POSTER_LAYOUT.animalMenuTriSize;
+  let staggerMs = POSTER_LAYOUT.animalMenuButtonStaggerMs;
+  let baseSnap = get(0, 0, platformW, platformH);
 
   push();
-  platformDrawAnimalMenuBackdrop(shadeAlpha);
+  platformDrawShareBackdrop(shadeAlpha, baseSnap);
 
-  translate(popoverCX, popoverCY);
-  scale(motion.scale);
-  translate(-popoverCX, -popoverCY);
-
-  let drawCard = {
-    x: card.x,
-    y: card.y + motion.offsetY,
-    w: card.w,
-    h: card.h
-  };
-  platformDrawShareCardBackground(drawCard);
-  platformDrawAnimalMenuPopoverPointer(drawCard, anchor, shadeAlpha);
-
-  platformApplyGrungeFont(p.grungeFont);
-  let ink = color(PLATFORM_TEXT_COLOR);
-  let triSize = POSTER_LAYOUT.animalMenuTriSize;
-  let triSlotW = POSTER_LAYOUT.animalMenuTriSlotW;
-  let triGap = POSTER_LAYOUT.animalMenuTriGap;
-  let textSizePx = ms(17);
-
-  textSize(textSizePx);
-  for (let i = 0; i < layout.rows.length; i++) {
-    let row = layout.rows[i];
-    let rowY = row.y + motion.offsetY;
+  for (let i = 0; i < layout.buttons.length; i++) {
+    let btn = layout.buttons[i];
+    let btnY = btn.y + motion.offsetY;
+    let btnCy = btn.cy + motion.offsetY;
     let hover =
       !p.touchDevice &&
-      mouseX > row.x &&
-      mouseX < row.x + row.w &&
-      mouseY > rowY &&
-      mouseY < rowY + row.h;
-    if (hover) {
-      fill(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 24);
-      rect(row.x, rowY + ms(5), row.w, row.h - ms(10), ms(8));
-    }
+      mouseX > btn.x &&
+      mouseX < btn.x + btn.w &&
+      mouseY > btnY &&
+      mouseY < btnY + btn.h;
 
-    let contentNudgeX = POSTER_LAYOUT.animalMenuContentNudgeX;
-    let labelNudgeX = POSTER_LAYOUT.animalMenuLabelNudgeX;
-    let triX = row.x + triSlotW / 2 + contentNudgeX;
-    let labelX = row.x + triSlotW + triGap + contentNudgeX + labelNudgeX;
-    let triY = rowY + row.h / 2;
-    platformDrawMenuAnimalTriangle(row.animal, triX, triY, triSize);
+    let staggerT = constrain(
+      (millis() - platformAnimalMenuOpenTime - i * staggerMs) /
+        PLATFORM_ANIMAL_MENU_FADE_MS,
+      0,
+      1
+    );
+    let staggerE = platformEaseOutCubic(staggerT);
+    let btnScale = lerp(0.86, 1, staggerE) * motion.scale;
+    let btnAlpha = 255 * staggerE;
+    let drawR = (btn.w * btnScale) / 2;
 
-    ink.setAlpha(hover ? 220 : 255);
-    fill(ink);
-    textAlign(LEFT, CENTER);
-    text(row.label, labelX, triY);
-
-    if (i < layout.rows.length - 1) {
-      stroke(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 22);
-      strokeWeight(1);
-      line(row.x, rowY + row.h, row.x + row.w, rowY + row.h);
-      noStroke();
-    }
+    platformDrawMenuGlassCircle(baseSnap, btn.cx, btnCy, drawR, hover, btnAlpha);
+    platformDrawMenuAnimalTriangle(
+      btn.animal,
+      btn.cx,
+      btnCy,
+      triSize * btnScale,
+      btnAlpha
+    );
   }
+
+  platformDrawFinalActionBar(p, 255);
   pop();
 }
 
@@ -1893,31 +1971,22 @@ function platformHandleAnimalMenuPress() {
   }
 
   let motion = platformGetAnimalMenuPopoverMotion();
-  let card = {
-    x: boxes.card.x,
-    y: boxes.card.y + motion.offsetY,
-    w: boxes.card.w,
-    h: boxes.card.h
-  };
 
-  if (!platformWasBoxClicked(card)) {
-    platformCloseAnimalMenu();
-    return;
-  }
-
-  for (let i = 0; i < boxes.rows.length; i++) {
-    let row = boxes.rows[i];
-    let rowBox = {
-      x: row.x,
-      y: row.y + motion.offsetY,
-      w: row.w,
-      h: row.h
+  for (let i = 0; i < boxes.buttons.length; i++) {
+    let btn = boxes.buttons[i];
+    let btnBox = {
+      x: btn.x,
+      y: btn.y + motion.offsetY,
+      w: btn.w,
+      h: btn.h
     };
-    if (platformWasBoxClicked(rowBox)) {
-      platformSwitchToAnimal(row.id);
+    if (platformWasBoxClicked(btnBox)) {
+      platformSwitchToAnimal(btn.id);
       return;
     }
   }
+
+  platformCloseAnimalMenu();
 }
 
 function platformGetSharePageUrl() {
@@ -2589,23 +2658,24 @@ function platformSyncShareIconBoxes(layout, previewRect) {
   layout.copiedY = iconsRowY + iconHit / 2 + ms(10);
 }
 
-function platformDrawShareBackdrop(shadeAlpha) {
+function platformDrawShareBackdrop(shadeAlpha, snap = null, maxY = null) {
   if (shadeAlpha <= 0) {
     return;
   }
 
-  let snap = get(0, 0, platformW, platformH);
+  let snapImg = snap || get(0, 0, platformW, platformH);
+  let clipH = maxY != null ? maxY : platformH;
   let ctx = drawingContext;
   ctx.save();
   ctx.beginPath();
-  ctx.rect(0, 0, platformW, platformH);
+  ctx.rect(0, 0, platformW, clipH);
   ctx.clip();
   ctx.filter = `blur(${PLATFORM_SHARE_BACKDROP_BLUR_PX}px)`;
-  ctx.drawImage(snap.canvas, 0, 0, platformW, platformH);
+  ctx.drawImage(snapImg.canvas, 0, 0, platformW, platformH);
   ctx.filter = "none";
   let shade = (shadeAlpha / 255) * PLATFORM_SHARE_BACKDROP_DARKEN;
   ctx.fillStyle = `rgba(${PLATFORM_TEXT_RGB[0]},${PLATFORM_TEXT_RGB[1]},${PLATFORM_TEXT_RGB[2]},${shade})`;
-  ctx.fillRect(0, 0, platformW, platformH);
+  ctx.fillRect(0, 0, platformW, clipH);
   ctx.restore();
 }
 
@@ -8030,13 +8100,12 @@ const POSTER_LAYOUT = {
   finalActionIconScale: 0.70,
   finalActionIconNudgeY: ms(4),
   finalActionMenuIconNudgeX: 2,
-  animalMenuRowH: ms(72),
-  animalMenuRowGap: ms(8),
-  animalMenuTriSize: ms(15),
-  animalMenuTriSlotW: ms(30),
-  animalMenuTriGap: ms(8),
-  animalMenuContentNudgeX: 7,
-  animalMenuLabelNudgeX: 1,
+  animalMenuArcSpan: (Math.PI * 2) / 3,
+  animalMenuArcRadiusMin: ms(118),
+  animalMenuCircleScale: 0.72,
+  animalMenuCircleGap: ms(16),
+  animalMenuTriSize: ms(15) * 1.95,
+  animalMenuButtonStaggerMs: 40,
   shareIconR: ms(26),
   shareInstagramIconR: ms(24),
   shareIconSizeBonus: ms(2),
@@ -9220,7 +9289,9 @@ function posterDrawFinalMessage(p, alphaOverride = null) {
   textLeading(bodyLeading);
   textAlign(LEFT, TOP);
   text(cfg.finalBody.text, bodyX, bodyY);
-  platformDrawFinalActionBar(p, alpha);
+  if (!platformAnimalMenuOpen) {
+    platformDrawFinalActionBar(p, alpha);
+  }
 }
 
 function posterDrawFeedback(p) {
