@@ -103,8 +103,6 @@ const REF_H = 975;
 
 const PLATFORM_EAGLE_ANIMAL_SCALE = 0.69 * 0.85;
 const PLATFORM_DEER_ANIMAL_SCALE = 0.815;
-const PLATFORM_EAGLE_INTRO_TRI_SCALE = 0.85;
-const PLATFORM_DEER_INTRO_TRI_SCALE = 0.85;
 
 // Standard phone portrait canvas
 const platformW = 390;
