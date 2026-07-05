@@ -1823,24 +1823,8 @@ function platformDrawChoiceButton(bx, by, bw, bh, cornerR, hover = false, alpha 
   ctx.restore();
 }
 
-function platformDrawLiquidGlassPill(bx, by, bw, bh, hover = false, alpha = 255) {
-  let ctx = drawingContext;
-  let a = alpha / 255;
+function platformFillLiquidGlassPillInterior(ctx, bx, by, bw, bh, hover, a) {
   let r = bh / 2;
-
-  ctx.save();
-  platformRoundRectPath(ctx, bx, by, bw, bh, r);
-  ctx.shadowColor = `rgba(132, 124, 114, ${(hover ? 0.14 : 0.11) * a})`;
-  ctx.shadowBlur = ms(hover ? 24 : 20);
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = ms(hover ? 5 : 4);
-  ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
-  ctx.fill();
-  ctx.restore();
-
-  ctx.save();
-  platformRoundRectPath(ctx, bx + 0.5, by + 0.5, bw - 1, bh - 1, r - 0.5);
-  ctx.clip();
 
   let innerShadow = ctx.createLinearGradient(
     bx,
@@ -1883,10 +1867,46 @@ function platformDrawLiquidGlassPill(bx, by, bw, bh, hover = false, alpha = 255)
   bottomShade.addColorStop(1, `rgba(132, 124, 114, ${(hover ? 0.13 : 0.1) * a})`);
   ctx.fillStyle = bottomShade;
   ctx.fillRect(bx, by, bw, bh);
-  ctx.restore();
+}
+
+function platformDrawLiquidGlassPillOuterShadows(ctx, bx, by, bw, bh, a) {
+  let r = bh / 2;
 
   ctx.save();
+  ctx.filter = `blur(${ms(7)}px)`;
+  platformRoundRectPath(ctx, bx, by + ms(1.5), bw, bh, r);
+  ctx.fillStyle = `rgba(132, 124, 114, ${0.065 * a})`;
+  ctx.fill();
+  ctx.restore();
+}
+
+function platformFillLiquidGlassPillLightDepth(ctx, bx, by, bw, bh, a) {
+  let topInner = ctx.createLinearGradient(
+    bx,
+    by,
+    bx + bw * 0.38,
+    by + bh * 0.88
+  );
+  topInner.addColorStop(0, `rgba(120, 112, 102, ${0.18 * a})`);
+  topInner.addColorStop(0.3, `rgba(148, 140, 130, ${0.08 * a})`);
+  topInner.addColorStop(0.55, `rgba(188, 182, 174, ${0.025 * a})`);
+  topInner.addColorStop(1, "rgba(255, 255, 255, 0)");
+  ctx.fillStyle = topInner;
+  ctx.fillRect(bx, by, bw, bh);
+
+  let bottomDepth = ctx.createLinearGradient(bx, by + bh * 0.38, bx, by + bh);
+  bottomDepth.addColorStop(0, "rgba(255, 255, 255, 0)");
+  bottomDepth.addColorStop(0.65, `rgba(120, 112, 102, ${0.045 * a})`);
+  bottomDepth.addColorStop(1, `rgba(90, 82, 74, ${0.085 * a})`);
+  ctx.fillStyle = bottomDepth;
+  ctx.fillRect(bx, by, bw, bh);
+}
+
+function platformStrokeLiquidGlassPillRim(ctx, bx, by, bw, bh, hover, a) {
+  let r = bh / 2;
   let rimInset = ms(0.45);
+
+  ctx.save();
   platformRoundRectPath(
     ctx,
     bx + rimInset,
@@ -1904,6 +1924,65 @@ function platformDrawLiquidGlassPill(bx, by, bw, bh, hover = false, alpha = 255)
   ctx.lineWidth = ms(0.85);
   ctx.stroke();
   ctx.restore();
+}
+
+function platformDrawLiquidGlassPillSurface(
+  bx,
+  by,
+  bw,
+  bh,
+  baseR,
+  baseG,
+  baseB,
+  baseAlpha,
+  hover = false,
+  glossAlpha = 1,
+  depth = "standard"
+) {
+  let ctx = drawingContext;
+  let a = glossAlpha;
+  let r = bh / 2;
+  let isLight = depth === "light";
+  let shadowMul = isLight ? 1.12 : 1;
+
+  if (isLight) {
+    platformDrawLiquidGlassPillOuterShadows(ctx, bx, by, bw, bh, a);
+  }
+
+  ctx.save();
+  platformRoundRectPath(ctx, bx, by, bw, bh, r);
+  ctx.shadowColor = `rgba(132, 124, 114, ${(hover ? 0.14 : 0.12) * a * shadowMul})`;
+  ctx.shadowBlur = ms(hover ? 24 : 20);
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = ms(hover ? 5 : 4);
+  ctx.fillStyle = `rgba(${baseR}, ${baseG}, ${baseB}, ${baseAlpha})`;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  platformRoundRectPath(ctx, bx + 0.5, by + 0.5, bw - 1, bh - 1, r - 0.5);
+  ctx.clip();
+  platformFillLiquidGlassPillInterior(ctx, bx, by, bw, bh, hover, a);
+  if (isLight) {
+    platformFillLiquidGlassPillLightDepth(ctx, bx, by, bw, bh, a);
+  }
+  ctx.restore();
+
+  platformStrokeLiquidGlassPillRim(ctx, bx, by, bw, bh, hover, a);
+}
+
+function platformDrawLiquidGlassPill(bx, by, bw, bh, hover = false, alpha = 255) {
+  platformDrawLiquidGlassPillSurface(
+    bx,
+    by,
+    bw,
+    bh,
+    255,
+    255,
+    255,
+    alpha / 255,
+    hover
+  );
 }
 
 // Light glass slab — subtle fill and a crisp gradient rim.
@@ -8543,24 +8622,41 @@ function platformGetProgressPillFillAmt(p, index, currentIndex) {
   return 0;
 }
 
-function platformDrawProgressPill(cx, y, pillW, pillH, pillR, fillAmt, brown, brownMuted) {
-  noStroke();
-  fill(brownMuted);
-  rect(cx, y, pillW, pillH, pillR);
+function platformDrawProgressPill(cx, y, pillW, pillH, pillR, fillAmt) {
+  let bx = cx - pillW / 2;
+  let by = y - pillH / 2;
+  let [br, bg, bb] = PLATFORM_TEXT_RGB;
+
+  platformDrawLiquidGlassPillSurface(
+    bx,
+    by,
+    pillW,
+    pillH,
+    255,
+    255,
+    255,
+    1,
+    false,
+    1,
+    "light"
+  );
 
   if (fillAmt <= 0) {
     return;
   }
 
-  fill(brown);
   if (fillAmt >= 1) {
-    rect(cx, y, pillW, pillH, pillR);
+    platformDrawLiquidGlassPillSurface(bx, by, pillW, pillH, br, bg, bb, 1, false);
     return;
   }
 
-  let x0 = cx - pillW / 2;
+  let ctx = drawingContext;
   let fw = max(pillH, pillW * fillAmt);
-  rect(x0 + fw / 2, y, fw, pillH, pillR);
+  ctx.save();
+  platformRoundRectPath(ctx, bx, by, fw, pillH, pillR);
+  ctx.clip();
+  platformDrawLiquidGlassPillSurface(bx, by, pillW, pillH, br, bg, bb, 1, false);
+  ctx.restore();
 }
 
 function platformGetHeaderProgressLayout(p) {
@@ -8590,18 +8686,10 @@ function platformDrawQuestionProgress(p) {
   }
 
   let layout = platformGetHeaderProgressLayout(p);
-  let brown = color(PLATFORM_TEXT_RGB[0], PLATFORM_TEXT_RGB[1], PLATFORM_TEXT_RGB[2], 255);
-  let brownMuted = color(
-    PLATFORM_TEXT_RGB[0],
-    PLATFORM_TEXT_RGB[1],
-    PLATFORM_TEXT_RGB[2],
-    POSTER_LAYOUT.progressUpcomingAlpha
-  );
   let currentIndex = constrain(p.clickCount, 0, total - 1);
 
   push();
   drawingContext.globalAlpha = 1;
-  rectMode(CENTER);
   noStroke();
 
   for (let i = 0; i < total; i++) {
@@ -8613,9 +8701,7 @@ function platformDrawQuestionProgress(p) {
       layout.pillW,
       layout.pillH,
       layout.pillR,
-      fillAmt,
-      brown,
-      brownMuted
+      fillAmt
     );
   }
 
