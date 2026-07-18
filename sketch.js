@@ -14,6 +14,7 @@ let platformIntroTransitionIndex = -1;
 let platformIntroTransitionStart = 0;
 let platformIntroTransitionDuration = 400;
 let platformIntroTransitionSnapshot = null;
+let platformIntroTransitionSoundLeadMs = 70;
 
 let platformPosterFadeStartTime = null;
 let platformPosterFadeDuration = 320;
@@ -114,6 +115,30 @@ let platformLastLayoutTighten = 1;
 let platformActivePosterQuestionNudgeY = 0;
 let platformSafeAreaProbe = null;
 let platformFinalDockBleedEl = null;
+let platformAudioCtx = null;
+let platformAudioMaster = null;
+let platformAudioUnlocked = false;
+let platformAudioMuted = false;
+let platformAudioMuteEl = null;
+let platformAudioSilentEl = null;
+let platformAudioSelectEl = null;
+let platformAudioHtmlEls = Object.create(null);
+let platformAudioSuppressUiClose = 0;
+let platformAudioBuffers = Object.create(null);
+let platformAudioBufferPromises = Object.create(null);
+let platformAudioActiveSources = [];
+let platformAudioGestureBound = false;
+let platformIgnoreNextMousePress = false;
+const PLATFORM_AUDIO_MUTE_KEY = "platformAudioMuted";
+const PLATFORM_AUDIO_MASTER_GAIN = 0.42;
+const PLATFORM_SFX_SAMPLE_V = 22;
+const PLATFORM_SFX_SAMPLE_URLS = {
+  wrong: `sfx/fail.mp3?v=${PLATFORM_SFX_SAMPLE_V}`,
+  correct: `sfx/correct.wav?v=${PLATFORM_SFX_SAMPLE_V}`,
+  correct2: `sfx/correct2.wav?v=${PLATFORM_SFX_SAMPLE_V}`,
+  complete: `sfx/complete.wav?v=${PLATFORM_SFX_SAMPLE_V}`,
+  select: `sfx/select.mp3?v=${PLATFORM_SFX_SAMPLE_V}`
+};
 
 function mx(x) {
   return x * platformW / REF_W;
@@ -142,6 +167,21 @@ const PLATFORM_SHARE_LOGO_CONTENT_FRAC = {
   facebook: { w: 696 / 736, h: 694 / 736 }
 };
 const PLATFORM_SHARE_PUBLIC_URL = "https://dafnaperez.github.io/Interactive2026/";
+
+// Procedural UI SFX (no audio files). Alive / musical, not flat beeps.
+// Keep select + complete loud; other cues sit quieter underneath.
+const PLATFORM_SFX_OTHER_VOLUME_SCALE = 0.58;
+const PLATFORM_SFX = {
+  select: { kind: "sample", sample: "select", gain: 0.62 },
+  correct: { kind: "sample", sample: "correct", gain: 0.22 },
+  correct2: { kind: "sample", sample: "correct2", gain: 0.22 },
+  wrong: { kind: "sample", sample: "wrong", gain: 0.22 },
+  progress: { kind: "pluck", freq: 884, dur: 0.09, gain: 0.001 },
+  complete: { kind: "sample", sample: "complete", gain: 1.35 },
+  uiOpen: { kind: "pluck", freq: 440, dur: 0.14, gain: 0.001 },
+  uiClose: { kind: "pluck", freq: 370, dur: 0.12, gain: 0.0008 },
+  share: { kind: "pluck", freq: 660, dur: 0.15, gain: 0.001 }
+};
 
 const PLATFORM_SHARE_ANIMAL_PHRASE = {
   turtle: "sea turtles",
@@ -457,6 +497,36 @@ function platformPreferManualCanvasBlur() {
     return false;
   }
   return /iP(hone|od|ad)/.test(navigator.userAgent);
+}
+
+function platformIsSafari() {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  let ua = navigator.userAgent || "";
+  let isIOS =
+    /iP(hone|od|ad)/.test(ua) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  // iOS Chrome/Firefox/Edge/Opera ship with "Safari" in the UA — exclude them.
+  if (/CriOS|FxiOS|EdgiOS|OPiOS/i.test(ua)) {
+    return false;
+  }
+  if (isIOS) {
+    // Remaining iOS browsers here are Safari (or Safari WebView with Apple UA).
+    return /AppleWebKit/i.test(ua) && !/Chrome|Firefox|SamsungBrowser/i.test(ua);
+  }
+
+  // Desktop Safari
+  return (
+    /Safari/i.test(ua) &&
+    /AppleWebKit/i.test(ua) &&
+    !/Chrome|Chromium|Edg\/|OPR|Firefox|SamsungBrowser/i.test(ua)
+  );
+}
+
+function platformGetSafariQuestionNudgeY() {
+  return platformIsSafari() ? POSTER_LAYOUT.questionPhaseSafariNudgeY : 0;
 }
 
 let platformMenuBackdropEl = null;
@@ -873,7 +943,7 @@ const platformText = {
   questionTitle: {
     text: "What would you choose?",
     x: platformW / 2,
-    y: my(920),
+    y: my(920) - ms(162) - ms(35) - ms(28) - ms(14),
     size: ms(24),
     leading: ms(28)
   },
@@ -985,6 +1055,875 @@ function platformApplyStartupQuery() {
   }
 }
 
+function platformAudioLoadMutePreference() {
+  try {
+    platformAudioMuted = localStorage.getItem(PLATFORM_AUDIO_MUTE_KEY) === "1";
+  } catch (e) {
+    platformAudioMuted = false;
+  }
+}
+
+function platformAudioSaveMutePreference() {
+  try {
+    localStorage.setItem(PLATFORM_AUDIO_MUTE_KEY, platformAudioMuted ? "1" : "0");
+  } catch (e) {
+    // ignore quota / private mode
+  }
+}
+
+function platformAudioApplyPlaybackSession() {
+  // iOS: default Web Audio is "ambient" and follows the mute switch.
+  // "playback" matches music/video so SFX still audibly play while silenced.
+  try {
+    if (typeof navigator !== "undefined" && navigator.audioSession) {
+      navigator.audioSession.type = "playback";
+    }
+  } catch (e) {
+    // ignore unsupported / restricted
+  }
+}
+
+function platformEnsureHtmlSampleEl(sampleName) {
+  if (typeof document === "undefined" || !PLATFORM_SFX_SAMPLE_URLS[sampleName]) {
+    return null;
+  }
+  if (platformAudioHtmlEls[sampleName]) {
+    return platformAudioHtmlEls[sampleName];
+  }
+  let el = document.createElement("audio");
+  el.setAttribute("playsinline", "");
+  el.setAttribute("webkit-playsinline", "");
+  el.preload = "auto";
+  el.src = PLATFORM_SFX_SAMPLE_URLS[sampleName];
+  el.volume = platformAudioMuted ? 0 : 0.55;
+  el.style.cssText =
+    "position:fixed;width:0;height:0;opacity:0;pointer-events:none;";
+  document.body.appendChild(el);
+  try {
+    el.load();
+  } catch (e) {
+    // ignore
+  }
+  platformAudioHtmlEls[sampleName] = el;
+  if (sampleName === "select") {
+    platformAudioSelectEl = el;
+    platformPrimeSelectAudioBlob(el);
+  }
+  return el;
+}
+
+function platformPrimeSelectAudioBlob(el) {
+  // Fully buffer select into a blob URL so the first tap plays with less delay.
+  if (!el || el.dataset.primed === "1") {
+    return;
+  }
+  fetch(PLATFORM_SFX_SAMPLE_URLS.select)
+    .then((res) => res.blob())
+    .then((blob) => {
+      let url = URL.createObjectURL(blob);
+      el.src = url;
+      el.dataset.primed = "1";
+      try {
+        el.load();
+      } catch (e) {
+        // ignore
+      }
+    })
+    .catch(() => {});
+}
+
+function platformPlayHtmlEl(el, volume = 0.55) {
+  if (platformAudioMuted || !el) {
+    return false;
+  }
+  platformAudioApplyPlaybackSession();
+  try {
+    // cloneNode avoids seek latency from currentTime=0 on the shared element.
+    let node = el.cloneNode(true);
+    node.muted = false;
+    node.volume = Math.max(0, Math.min(1, volume));
+    node.style.cssText =
+      "position:fixed;width:0;height:0;opacity:0;pointer-events:none;";
+    document.body.appendChild(node);
+    let cleanup = () => {
+      try {
+        node.pause();
+      } catch (e) {
+        // ignore
+      }
+      if (node.parentNode) {
+        node.parentNode.removeChild(node);
+      }
+    };
+    node.addEventListener("ended", cleanup);
+    setTimeout(cleanup, 8000);
+    let playResult = node.play();
+    if (playResult && typeof playResult.catch === "function") {
+      playResult.catch(() => {
+        cleanup();
+      });
+    }
+    platformAudioUnlocked = true;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function platformPlayHtmlSample(sampleName, volume = 0.55) {
+  return platformPlayHtmlEl(platformEnsureHtmlSampleEl(sampleName), volume);
+}
+
+// Soft UI plucks as HTMLAudio (iOS silent-switch / gesture safe).
+// Web Audio oscillators often stay silent after quiz SFX moved to <audio>.
+function platformBuildToneBlobUrl(freq, durSec, peak = 0.55) {
+  let sampleRate = 22050;
+  let numSamples = Math.max(1, Math.floor(sampleRate * durSec));
+  let dataBytes = numSamples * 2;
+  let buffer = new ArrayBuffer(44 + dataBytes);
+  let view = new DataView(buffer);
+  let writeStr = (offset, str) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+  writeStr(0, "RIFF");
+  view.setUint32(4, 36 + dataBytes, true);
+  writeStr(8, "WAVE");
+  writeStr(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, "data");
+  view.setUint32(40, dataBytes, true);
+  for (let i = 0; i < numSamples; i++) {
+    let t = i / sampleRate;
+    let env = Math.exp(-t * 22);
+    // Soft sine only — triangle harmonics read as “loud” even at low gain.
+    let s = Math.sin(2 * Math.PI * freq * t) * env * peak;
+    view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, s)) * 32767, true);
+  }
+  return URL.createObjectURL(new Blob([buffer], { type: "audio/wav" }));
+}
+
+function platformEnsurePluckHtmlEl(patch) {
+  if (typeof document === "undefined" || !patch) {
+    return null;
+  }
+  // Versioned key so older loud blobs are dropped after volume changes.
+  let key = "pluck:v3:" + patch.freq + ":" + patch.dur;
+  if (platformAudioHtmlEls[key]) {
+    return platformAudioHtmlEls[key];
+  }
+  let el = document.createElement("audio");
+  el.setAttribute("playsinline", "");
+  el.setAttribute("webkit-playsinline", "");
+  el.preload = "auto";
+  // Bake quiet into the sample — iOS often ignores HTMLAudio.volume on clones.
+  el.src = platformBuildToneBlobUrl(patch.freq, Math.max(0.06, patch.dur || 0.1), 0.035);
+  el.volume = platformAudioMuted ? 0 : 0.35;
+  el.style.cssText =
+    "position:fixed;width:0;height:0;opacity:0;pointer-events:none;";
+  document.body.appendChild(el);
+  try {
+    el.load();
+  } catch (e) {
+    // ignore
+  }
+  platformAudioHtmlEls[key] = el;
+  return el;
+}
+
+function platformPlayPluckHtml(patch) {
+  if (platformAudioMuted) {
+    return false;
+  }
+  let el = platformEnsurePluckHtmlEl(patch);
+  if (!el) {
+    return false;
+  }
+  platformAudioApplyPlaybackSession();
+  try {
+    // Don't clone — volume is unreliable on iOS clones; sample is already quiet.
+    el.muted = false;
+    el.volume = 0.28;
+    try {
+      if (el.ended || el.currentTime > 0.02) {
+        el.currentTime = 0;
+      }
+    } catch (e) {
+      // ignore
+    }
+    let playResult = el.play();
+    if (playResult && typeof playResult.catch === "function") {
+      playResult.catch(() => {});
+    }
+    platformAudioUnlocked = true;
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function platformWarmUiPluckHtml() {
+  ["uiOpen", "uiClose", "share", "progress"].forEach((name) => {
+    let patch = PLATFORM_SFX[name];
+    if (patch && patch.kind === "pluck") {
+      platformEnsurePluckHtmlEl(patch);
+    }
+  });
+}
+
+function platformEnsureSelectAudioEl() {
+  return platformEnsureHtmlSampleEl("select");
+}
+
+function platformPlaySelectHtml() {
+  return platformPlayHtmlSample("select", 0.7);
+}
+
+function platformPreloadAllHtmlSamples() {
+  Object.keys(PLATFORM_SFX_SAMPLE_URLS).forEach((key) => {
+    platformEnsureHtmlSampleEl(key);
+  });
+}
+
+function platformEnsureSilentMediaUnlock() {
+  if (platformAudioSilentEl || typeof document === "undefined") {
+    return platformAudioSilentEl;
+  }
+  // Tiny silent WAV — helps older iOS treat this page as media playback.
+  let el = document.createElement("audio");
+  el.setAttribute("playsinline", "");
+  el.setAttribute("webkit-playsinline", "");
+  el.preload = "auto";
+  el.loop = true;
+  el.volume = 0.001;
+  el.src =
+    "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==";
+  el.style.cssText = "position:fixed;width:0;height:0;opacity:0;pointer-events:none;";
+  document.body.appendChild(el);
+  platformAudioSilentEl = el;
+  return el;
+}
+
+function platformKickSilentMedia() {
+  let el = platformEnsureSilentMediaUnlock();
+  if (!el) {
+    return;
+  }
+  try {
+    let playResult = el.play();
+    if (playResult && typeof playResult.catch === "function") {
+      playResult.catch(() => {});
+    }
+  } catch (e) {
+    // ignore autoplay rejection outside a gesture
+  }
+}
+
+function platformEnsureAudio() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  let AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) {
+    return null;
+  }
+  if (!platformAudioCtx) {
+    platformAudioApplyPlaybackSession();
+    platformAudioCtx = new AC();
+    platformAudioMaster = platformAudioCtx.createGain();
+    platformAudioMaster.gain.value = platformAudioMuted ? 0 : PLATFORM_AUDIO_MASTER_GAIN;
+    platformAudioMaster.connect(platformAudioCtx.destination);
+  }
+  return platformAudioCtx;
+}
+
+function platformLoadAudioSample(name) {
+  let ctx = platformEnsureAudio();
+  if (!ctx || !PLATFORM_SFX_SAMPLE_URLS[name]) {
+    return Promise.resolve(false);
+  }
+  if (platformAudioBuffers[name]) {
+    return Promise.resolve(true);
+  }
+  if (platformAudioBufferPromises[name]) {
+    return platformAudioBufferPromises[name];
+  }
+
+  platformAudioBufferPromises[name] = fetch(PLATFORM_SFX_SAMPLE_URLS[name])
+    .then((res) => {
+      if (!res.ok) {
+        throw new Error("sfx fetch failed: " + name);
+      }
+      return res.arrayBuffer();
+    })
+    .then((ab) => ctx.decodeAudioData(ab.slice(0)))
+    .then((buf) => {
+      platformAudioBuffers[name] = buf;
+      return true;
+    })
+    .catch(() => {
+      platformAudioBufferPromises[name] = null;
+      return false;
+    });
+
+  return platformAudioBufferPromises[name];
+}
+
+function platformLoadAudioSamples() {
+  // Warm all samples in the background; individual plays wait only on their own file.
+  return Promise.all(
+    Object.keys(PLATFORM_SFX_SAMPLE_URLS).map((key) => platformLoadAudioSample(key))
+  ).then(() => true);
+}
+
+function platformStopActiveSfx() {
+  for (let i = 0; i < platformAudioActiveSources.length; i++) {
+    try {
+      platformAudioActiveSources[i].stop();
+    } catch (e) {
+      // already stopped
+    }
+  }
+  platformAudioActiveSources = [];
+}
+
+function platformPlaySample(name, gain) {
+  let ctx = platformEnsureAudio();
+  let buf = platformAudioBuffers[name];
+  if (!ctx || !buf || !platformAudioMaster) {
+    return false;
+  }
+  let src = ctx.createBufferSource();
+  src.buffer = buf;
+  let g = ctx.createGain();
+  // Complete bypasses the quiet master bus so the finale can hit hard.
+  let peak = Math.max(0.0001, gain == null ? 0.6 : gain);
+  let dest = platformAudioMaster;
+  if (name === "complete") {
+    dest = ctx.destination;
+    peak = Math.max(peak, 1.35);
+  }
+  g.gain.value = peak;
+  src.connect(g);
+  g.connect(dest);
+  platformAudioActiveSources.push(src);
+  src.onended = () => {
+    platformAudioActiveSources = platformAudioActiveSources.filter((s) => s !== src);
+  };
+  src.start(ctx.currentTime + 0.01);
+  return true;
+}
+
+function platformAudioUnlockSync() {
+  // Must run inside the user-gesture call stack (triangle tap / touch).
+  platformAudioApplyPlaybackSession();
+  platformKickSilentMedia();
+  let ctx = platformEnsureAudio();
+  if (!ctx) {
+    return;
+  }
+  if (ctx.state === "suspended") {
+    ctx.resume().catch(() => {});
+  }
+  // Tiny silent buffer started in-gesture unlocks Web Audio for later SFX.
+  try {
+    let buf = ctx.createBuffer(1, 1, ctx.sampleRate || 44100);
+    let src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start(0);
+    platformAudioUnlocked = true;
+  } catch (e) {
+    // ignore
+  }
+}
+
+function platformAudioUnlock() {
+  platformAudioUnlockSync();
+  let ctx = platformEnsureAudio();
+  if (!ctx) {
+    return Promise.resolve(false);
+  }
+  let ready =
+    ctx.state === "suspended"
+      ? ctx.resume().then(() => true).catch(() => false)
+      : Promise.resolve(true);
+  return ready.then((ok) => {
+    if (ok) {
+      platformAudioUnlocked = true;
+      platformAudioApplyPlaybackSession();
+    }
+    return ok;
+  });
+}
+
+function platformScheduleAudioWarmup(delayMs = 500) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  setTimeout(() => {
+    platformWarmUiPluckHtml();
+    platformAudioUnlock().then(() => {
+      platformLoadAudioSample("select");
+      platformLoadAudioSamples();
+    });
+  }, delayMs);
+}
+
+function platformBindAudioGestureUnlock() {
+  if (platformAudioGestureBound || typeof window === "undefined") {
+    return;
+  }
+  platformAudioGestureBound = true;
+  let kick = () => {
+    // Avoid creating AudioContext during intro zoom — that hitchs iOS hard.
+    if (platformMode === "intro" || platformIntroTransitionActive) {
+      platformKickSilentMedia();
+      return;
+    }
+    platformAudioUnlockSync();
+  };
+  window.addEventListener("touchstart", kick, { capture: true, passive: true });
+  window.addEventListener("pointerdown", kick, { capture: true });
+}
+
+function platformAudioSetMuted(muted) {
+  platformAudioMuted = !!muted;
+  platformAudioSaveMutePreference();
+  if (platformAudioMaster) {
+    let ctx = platformAudioCtx;
+    let now = ctx ? ctx.currentTime : 0;
+    platformAudioMaster.gain.cancelScheduledValues(now);
+    platformAudioMaster.gain.setValueAtTime(
+      platformAudioMuted ? 0 : PLATFORM_AUDIO_MASTER_GAIN,
+      now
+    );
+  }
+  if (platformAudioSelectEl) {
+    platformAudioSelectEl.muted = platformAudioMuted;
+    platformAudioSelectEl.volume = platformAudioMuted ? 0 : 0.55;
+  }
+  Object.keys(platformAudioHtmlEls).forEach((key) => {
+    let el = platformAudioHtmlEls[key];
+    if (!el) {
+      return;
+    }
+    el.muted = platformAudioMuted;
+    el.volume = platformAudioMuted ? 0 : 0.55;
+  });
+  platformAudioSyncMuteButton();
+}
+
+function platformAudioToggleMute() {
+  platformAudioUnlock().then(() => {
+    platformAudioSetMuted(!platformAudioMuted);
+    if (!platformAudioMuted) {
+      platformPlaySfx("progress");
+    }
+  });
+}
+
+function platformAudioMuteIconSvg(muted) {
+  if (muted) {
+    return (
+      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+      '<path d="M4 9v6h3.5L12 19V5L7.5 9H4z" fill="#4E463D"/>' +
+      '<path d="M15.5 9.5l5 5M20.5 9.5l-5 5" stroke="#4E463D" stroke-width="1.7" stroke-linecap="round"/>' +
+      "</svg>"
+    );
+  }
+  return (
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
+    '<path d="M4 9v6h3.5L12 19V5L7.5 9H4z" fill="#4E463D"/>' +
+    '<path d="M15.2 8.4a4.2 4.2 0 0 1 0 7.2" stroke="#4E463D" stroke-width="1.6" stroke-linecap="round"/>' +
+    '<path d="M17.4 6.2a7 7 0 0 1 0 11.6" stroke="#4E463D" stroke-width="1.6" stroke-linecap="round"/>' +
+    "</svg>"
+  );
+}
+
+function platformAudioSyncMuteButton() {
+  let el = platformAudioMuteEl;
+  if (!el) {
+    return;
+  }
+  el.innerHTML = platformAudioMuteIconSvg(platformAudioMuted);
+  el.setAttribute("aria-label", platformAudioMuted ? "Unmute sound" : "Mute sound");
+  el.setAttribute("aria-pressed", platformAudioMuted ? "true" : "false");
+}
+
+function platformEnsureMuteButton() {
+  if (platformAudioMuteEl || typeof document === "undefined") {
+    return platformAudioMuteEl;
+  }
+  let el = document.createElement("button");
+  el.id = "platform-audio-mute";
+  el.type = "button";
+  el.style.cssText =
+    "position:fixed;top:max(10px, env(safe-area-inset-top, 0px));" +
+    "right:max(10px, env(safe-area-inset-right, 0px));" +
+    "width:40px;height:40px;border:0;border-radius:999px;padding:0;" +
+    "display:flex;align-items:center;justify-content:center;cursor:pointer;" +
+    "background:rgba(255,255,255,0.55);backdrop-filter:blur(12px);" +
+    "-webkit-backdrop-filter:blur(12px);" +
+    "box-shadow:0 1px 0 rgba(255,255,255,0.7) inset, 0 6px 18px rgba(78,70,61,0.12);" +
+    "z-index:30;-webkit-tap-highlight-color:transparent;touch-action:manipulation;";
+  el.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    platformAudioToggleMute();
+  });
+  el.addEventListener(
+    "touchstart",
+    (e) => {
+      e.stopPropagation();
+      platformAudioUnlock();
+    },
+    { passive: true }
+  );
+  document.body.appendChild(el);
+  platformAudioMuteEl = el;
+  platformAudioSyncMuteButton();
+  return el;
+}
+
+function platformAudioVoiceAt(freq, start, dur, gain, opts = {}) {
+  let ctx = platformEnsureAudio();
+  if (!ctx || !platformAudioMaster) {
+    return;
+  }
+  let type = opts.type || "triangle";
+  let bright = opts.bright == null ? 0.22 : opts.bright;
+  let slideTo = opts.slideTo || 0;
+  let attack = opts.attack == null ? 0.012 : opts.attack;
+  let peak = Math.max(0.0001, gain);
+
+  let filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.setValueAtTime(Math.min(4200, freq * 4.5), start);
+  filter.Q.setValueAtTime(0.7, start);
+
+  let g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.exponentialRampToValueAtTime(peak, start + Math.max(0.006, attack));
+  g.gain.exponentialRampToValueAtTime(peak * 0.55, start + dur * 0.35);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+
+  let osc = ctx.createOscillator();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, start);
+  if (slideTo > 0) {
+    osc.frequency.exponentialRampToValueAtTime(Math.max(40, slideTo), start + dur);
+  }
+
+  let harm = ctx.createOscillator();
+  harm.type = "sine";
+  harm.frequency.setValueAtTime(freq * 2.01, start);
+  if (slideTo > 0) {
+    harm.frequency.exponentialRampToValueAtTime(Math.max(80, slideTo * 2.01), start + dur);
+  }
+  let harmG = ctx.createGain();
+  harmG.gain.setValueAtTime(peak * bright, start);
+
+  osc.connect(filter);
+  harm.connect(harmG);
+  harmG.connect(filter);
+  filter.connect(g);
+  g.connect(platformAudioMaster);
+
+  osc.start(start);
+  harm.start(start);
+  osc.stop(start + dur + 0.03);
+  harm.stop(start + dur + 0.03);
+}
+
+function platformAudioNoiseBurst(start, dur, gain, opts = {}) {
+  let ctx = platformEnsureAudio();
+  if (!ctx || !platformAudioMaster) {
+    return;
+  }
+  let len = Math.max(1, Math.floor(ctx.sampleRate * dur));
+  let buffer = ctx.createBuffer(1, len, ctx.sampleRate);
+  let data = buffer.getChannelData(0);
+  for (let i = 0; i < len; i++) {
+    data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  }
+  let src = ctx.createBufferSource();
+  src.buffer = buffer;
+  let filter = ctx.createBiquadFilter();
+  filter.type = opts.highpass ? "highpass" : "bandpass";
+  filter.frequency.setValueAtTime(opts.freq || 1800, start);
+  filter.Q.setValueAtTime(opts.q || 0.8, start);
+  let g = ctx.createGain();
+  let peak = Math.max(0.0001, gain);
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.exponentialRampToValueAtTime(peak, start + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  src.connect(filter);
+  filter.connect(g);
+  g.connect(platformAudioMaster);
+  src.start(start);
+  src.stop(start + dur + 0.02);
+}
+
+function platformPlaySelectSfx(t0) {
+  // Soft airy whoosh into the animal — not a musical pluck.
+  platformAudioVoiceAt(620, t0, 0.2, 0.04, {
+    type: "sine",
+    bright: 0.05,
+    slideTo: 980,
+    attack: 0.02
+  });
+  platformAudioNoiseBurst(t0, 0.14, 0.05, { freq: 1600, q: 0.55, highpass: true });
+}
+
+function platformPlayCorrectSfx(t0) {
+  // Fallback if sample not loaded yet — same ta-da family as success.wav.
+  platformAudioVoiceAt(784.0, t0, 0.12, 0.1, {
+    type: "triangle",
+    bright: 0.18,
+    attack: 0.006
+  });
+  let da = t0 + 0.13;
+  platformAudioVoiceAt(523.25, da, 0.42, 0.07, { type: "sine", bright: 0.1, attack: 0.01 });
+  platformAudioVoiceAt(659.25, da, 0.45, 0.095, {
+    type: "triangle",
+    bright: 0.22,
+    attack: 0.008
+  });
+  platformAudioVoiceAt(1046.5, da, 0.48, 0.08, { type: "sine", bright: 0.3, attack: 0.008 });
+}
+
+function platformPlayWrongSfx(t0) {
+  // Fallback if sample not loaded yet — descending drop in fail.mp3's register.
+  let notes = [880.0, 783.99, 698.46, 587.33, 493.88, 415.3];
+  for (let i = 0; i < notes.length; i++) {
+    let t = t0 + i * 0.08;
+    let next = notes[Math.min(i + 1, notes.length - 1)] * 0.94;
+    platformAudioVoiceAt(notes[i], t, 0.3, 0.1 - i * 0.008, {
+      type: "triangle",
+      bright: 0.16,
+      slideTo: next,
+      attack: 0.009
+    });
+  }
+}
+
+function platformPlayCompleteSfx(t0) {
+  // Big fun finale when the animal locks together.
+  platformAudioVoiceAt(130.81, t0, 0.55, 0.11, {
+    type: "sine",
+    bright: 0.08,
+    attack: 0.02
+  });
+  platformAudioNoiseBurst(t0, 0.08, 0.055, { freq: 220, q: 0.7 });
+
+  let rise = [261.63, 329.63, 392.0, 523.25, 659.25, 783.99, 1046.5];
+  for (let i = 0; i < rise.length; i++) {
+    platformAudioVoiceAt(rise[i], t0 + 0.04 + i * 0.07, 0.42, 0.1 - i * 0.008, {
+      type: i % 2 === 0 ? "triangle" : "sine",
+      bright: 0.32,
+      attack: 0.006
+    });
+  }
+
+  // Sparkle shimmer on top
+  let sparkle = [1318.5, 1568.0, 2093.0, 2637.0];
+  for (let i = 0; i < sparkle.length; i++) {
+    platformAudioVoiceAt(sparkle[i], t0 + 0.28 + i * 0.05, 0.35, 0.045, {
+      type: "sine",
+      bright: 0.4,
+      attack: 0.004
+    });
+  }
+  platformAudioNoiseBurst(t0 + 0.3, 0.14, 0.04, { freq: 3200, q: 0.5, highpass: true });
+}
+
+function platformPlaySfx(name) {
+  if (platformAudioMuted) {
+    return;
+  }
+  let patch = PLATFORM_SFX[name];
+  if (!patch) {
+    return;
+  }
+
+  // Unlock Web Audio in-gesture for any later/delayed playback.
+  platformAudioUnlockSync();
+
+  // Sample SFX: HTMLAudio play() in this tap stack (same fix as triangle select).
+  if (patch.kind === "sample") {
+    let vol;
+    if (patch.sample === "complete") {
+      vol = 1;
+    } else if (patch.sample === "select") {
+      vol = 0.7;
+    } else {
+      vol = Math.max(
+        0.05,
+        Math.min(1, (patch.gain || 0.6) * 0.9 * PLATFORM_SFX_OTHER_VOLUME_SCALE)
+      );
+    }
+    if (patch.sample === "complete") {
+      platformStopActiveSfx();
+      Object.keys(platformAudioHtmlEls).forEach((key) => {
+        if (key === "complete" || String(key).indexOf("pluck:") === 0) {
+          return;
+        }
+        try {
+          platformAudioHtmlEls[key].pause();
+        } catch (e) {
+          // ignore
+        }
+      });
+    }
+    if (platformPlayHtmlSample(patch.sample, vol)) {
+      // Warm remaining buffers off the critical path.
+      platformScheduleAudioWarmup(250);
+      return;
+    }
+  }
+
+  // UI plucks: HTMLAudio only (sample is pre-baked quiet). Skip Web Audio —
+  // oscillators were reading much louder than the HTML path on device.
+  if (patch.kind === "pluck") {
+    platformPlayPluckHtml(patch);
+    return;
+  }
+
+  let run = () => {
+    let ctx = platformEnsureAudio();
+    if (!ctx || !platformAudioMaster) {
+      return;
+    }
+    let startPlay = () => {
+      platformAudioApplyPlaybackSession();
+      let t0 = ctx.currentTime + 0.01;
+      if (patch.kind === "sample") {
+        if (patch.sample === "complete") {
+          platformStopActiveSfx();
+        }
+        if (!platformPlaySample(patch.sample, patch.gain)) {
+          if (patch.sample === "correct") {
+            platformPlayCorrectSfx(t0);
+          } else if (patch.sample === "wrong") {
+            platformPlayWrongSfx(t0);
+          } else if (patch.sample === "select") {
+            platformPlaySelectSfx(t0);
+          }
+        }
+        return;
+      }
+      if (patch.kind === "select") {
+        platformPlaySelectSfx(t0);
+        return;
+      }
+      if (patch.kind === "correct") {
+        platformPlayCorrectSfx(t0);
+        return;
+      }
+      if (patch.kind === "wrong") {
+        platformPlayWrongSfx(t0);
+        return;
+      }
+      if (patch.kind === "pluck") {
+        platformAudioVoiceAt(patch.freq, t0, patch.dur, patch.gain, {
+          type: "triangle",
+          bright: 0.2,
+          attack: 0.008
+        });
+      }
+    };
+
+    if (ctx.state === "suspended") {
+      ctx.resume().then(startPlay).catch(() => {});
+      return;
+    }
+    startPlay();
+  };
+
+  let sampleName = patch.kind === "sample" ? patch.sample : null;
+
+  platformAudioUnlock()
+    .then((ok) => {
+      if (ok === false) {
+        return false;
+      }
+      if (sampleName) {
+        return platformLoadAudioSample(sampleName);
+      }
+      return true;
+    })
+    .then((ok) => {
+      if (ok !== false) {
+        run();
+      }
+    });
+}
+
+function platformPlayUiOpenSfx() {
+  platformPlaySfx("uiOpen");
+}
+
+function platformPlayUiCloseSfx() {
+  if (platformAudioSuppressUiClose > 0) {
+    return;
+  }
+  platformPlaySfx("uiClose");
+}
+
+function platformWithSuppressedUiClose(fn) {
+  platformAudioSuppressUiClose++;
+  try {
+    fn();
+  } finally {
+    platformAudioSuppressUiClose--;
+  }
+}
+
+function platformNotifyFinalReveal(p) {
+  if (!p || p.audioFinalRevealPlayed) {
+    return;
+  }
+  p.audioFinalRevealPlayed = true;
+  // Default +300ms; toad plays as soon as assembly counts as done.
+  let delayMs = p.id === "toad" ? 0 : 300;
+  let playComplete = () => {
+    // Prefer full-volume HTML first. Web Audio through the master bus was
+    // making great-success much quieter than the other sample SFX.
+    platformAudioApplyPlaybackSession();
+    platformKickSilentMedia();
+    if (platformPlayHtmlSample("complete", 1)) {
+      return;
+    }
+    platformAudioUnlockSync();
+    platformAudioUnlock()
+      .then((ok) => (ok === false ? false : platformLoadAudioSample("complete")))
+      .then((ok) => {
+        if (ok === false) {
+          return;
+        }
+        platformPlaySample("complete", 1.35);
+      });
+  };
+  if (delayMs <= 0) {
+    if (!platformPlayHtmlSample("complete", 1)) {
+      playComplete();
+    }
+    return;
+  }
+  platformAudioUnlockSync();
+  platformEnsureHtmlSampleEl("complete");
+  platformLoadAudioSample("complete");
+  setTimeout(playComplete, delayMs);
+}
+
 function setup() {
   pixelDensity(displayDensity());
   let cnv = createCanvas(platformW, platformH);
@@ -995,6 +1934,12 @@ function setup() {
   }
 
   platformCanvasReady = true;
+  platformAudioLoadMutePreference();
+  platformAudioApplyPlaybackSession();
+  platformEnsureSilentMediaUnlock();
+  platformPreloadAllHtmlSamples();
+  platformEnsureMuteButton();
+  platformBindAudioGestureUnlock();
   platformProcessLineArtImages();
   platformBindViewportListeners();
   platformApplyViewportLayout();
@@ -1045,10 +1990,18 @@ function draw() {
 }
 
 function mousePressed() {
+  // iOS synthesizes mouse events after touch; audio unlock/play only counts on touchstart.
+  if (platformIgnoreNextMousePress) {
+    platformIgnoreNextMousePress = false;
+    return;
+  }
   if (platformMode === "intro") {
     platformHandleIntroPress(mouseX, mouseY);
     return;
   }
+  platformAudioUnlockSync();
+  platformAudioUnlock();
+  platformScheduleAudioWarmup(0);
 
   if (platformMode === "loading") {
     return;
@@ -1077,17 +2030,31 @@ function mousePressed() {
 }
 
 function touchStarted() {
+  // Always ignore the synthetic mouse click iOS fires after a touch.
+  platformIgnoreNextMousePress = true;
+  // Prefer real touch coords — mouseX/Y can lag on the first tap.
+  let x = mouseX;
+  let y = mouseY;
+  if (typeof touches !== "undefined" && touches.length > 0) {
+    x = touches[0].x;
+    y = touches[0].y;
+  }
   if (platformMode === "intro") {
-    platformHandleIntroPress(mouseX, mouseY);
+    // No Web Audio unlock here — it hitchs the zoom. HTML select is enough.
+    platformHandleIntroPress(x, y);
     return false;
   }
+
+  platformAudioUnlockSync();
+  platformAudioUnlock();
+  platformScheduleAudioWarmup(0);
 
   if (platformMode === "loading") {
     return false;
   }
 
   if (platformShareOpen) {
-    platformHandleSharePointerDown(mouseX, mouseY);
+    platformHandleSharePointerDown(x, y);
     return false;
   }
 
@@ -2314,7 +3281,9 @@ function platformTryBakeSharePreviewStill(p) {
 }
 
 function platformOpenShare() {
-  platformCloseAnimalMenu();
+  platformWithSuppressedUiClose(() => {
+    platformCloseAnimalMenu();
+  });
   platformResetShareDragState();
   let p = posterRegistry[platformMode];
   platformShareOpen = true;
@@ -2325,9 +3294,11 @@ function platformOpenShare() {
     platformBakeSharePreviewStill(p);
   }
   platformShareBoxes = p ? platformGetShareOverlayLayout(p) : null;
+  platformPlayUiOpenSfx();
 }
 
 function platformCloseShare() {
+  let wasOpen = platformShareOpen;
   platformShareOpen = false;
   platformShareCopiedUntil = 0;
   platformShareCopiedMessage = "";
@@ -2335,6 +3306,9 @@ function platformCloseShare() {
   platformSharePreviewStill = false;
   platformResetShareDragState();
   platformHideMenuOverlayLayers();
+  if (wasOpen) {
+    platformPlayUiCloseSfx();
+  }
 }
 
 function platformResetShareDragState() {
@@ -2473,25 +3447,35 @@ function platformGetAnimalMenuLayout(p) {
 }
 
 function platformOpenAnimalMenu() {
-  platformCloseShare();
+  platformWithSuppressedUiClose(() => {
+    platformCloseShare();
+  });
   let p = posterRegistry[platformMode];
   platformAnimalMenuOpen = true;
   platformAnimalMenuOpenTime = millis();
   platformAnimalMenuBoxes = p ? platformGetAnimalMenuLayout(p) : null;
+  platformPlayUiOpenSfx();
 }
 
 function platformCloseAnimalMenu() {
+  let wasOpen = platformAnimalMenuOpen;
   platformAnimalMenuOpen = false;
   platformAnimalMenuBoxes = null;
   platformHideMenuOverlayLayers();
+  if (wasOpen) {
+    platformPlayUiCloseSfx();
+  }
 }
 
 function platformSwitchToAnimal(animalId) {
   if (!animalId || !posterRegistry[animalId] || animalId === platformMode) {
     return;
   }
-  platformCloseAnimalMenu();
-  platformCloseShare();
+  platformWithSuppressedUiClose(() => {
+    platformCloseAnimalMenu();
+    platformCloseShare();
+  });
+  platformPlaySfx("select");
   platformEnterAnimal(animalId);
 }
 
@@ -2721,6 +3705,7 @@ function platformShareViaWhatsApp(p) {
     return;
   }
 
+  platformPlaySfx("share");
   let text = platformGetSharePayload(p).text;
   let encoded = encodeURIComponent(text);
 
@@ -2763,6 +3748,7 @@ function platformShareInstagramFallback(p, payload) {
 }
 
 function platformShareViaInstagram(p) {
+  platformPlaySfx("share");
   platformShareViaNativeSheet(p, platformShareInstagramFallback);
 }
 
@@ -2778,6 +3764,7 @@ function platformShareFacebookFallback(p, payload) {
 }
 
 function platformShareViaFacebook(p) {
+  platformPlaySfx("share");
   platformShareViaNativeSheet(p, platformShareFacebookFallback);
 }
 
@@ -3898,6 +4885,72 @@ function platformDrawMainBackground() {
 }
 
 function platformDrawIntro() {
+  // Zoom-only path: skip title/other triangles so the fill stays smooth.
+  if (platformIntroTransitionActive && platformIntroTransitionSnapshot) {
+    let elapsed = millis() - platformIntroTransitionStart;
+    let animal = platformAnimals[platformIntroTransitionIndex];
+    let snap = platformIntroTransitionSnapshot;
+    let pts = snap.pts;
+    let cx = snap.cx;
+    let cy = snap.cy;
+
+    // Hold still briefly so the select sound attack leads the zoom.
+    if (elapsed < 0) {
+      noStroke();
+      background("#FFFFFF");
+      push();
+      translate(cx, cy);
+      scale(snap.startScale);
+      translate(-cx, -cy);
+      fill(animal.color);
+      triangle(
+        pts[0][0], pts[0][1],
+        pts[1][0], pts[1][1],
+        pts[2][0], pts[2][1]
+      );
+      pop();
+      return;
+    }
+
+    let t = constrain(elapsed / platformIntroTransitionDuration, 0, 1);
+    let e = platformEaseOutCubic(t);
+    let zoomScale = lerp(snap.startScale, snap.zoomScale, e);
+    let bgMix = constrain(map(e, 0.35, 0.85, 0, 1), 0, 1);
+
+    noStroke();
+    background("#FFFFFF");
+    if (bgMix > 0) {
+      fill(lerpColor(color("#FFFFFF"), color(animal.color), bgMix));
+      rect(0, 0, platformW, platformH);
+    }
+
+    push();
+    translate(cx, cy);
+    scale(zoomScale);
+    translate(-cx, -cy);
+    fill(animal.color);
+    triangle(
+      pts[0][0], pts[0][1],
+      pts[1][0], pts[1][1],
+      pts[2][0], pts[2][1]
+    );
+    pop();
+
+    if (t >= 1) {
+      platformIntroTransitionActive = false;
+      platformIntroTransitionIndex = -1;
+      platformIntroTransitionSnapshot = null;
+      platformPosterFadeColor = animal.color;
+      platformPosterFadeDuration = 420;
+      platformPosterFadeStartTime = millis();
+      platformSkipNextSessionFade = true;
+      platformEnterAnimal(animal.id);
+      // Unlock Web Audio + decode quiz SFX only after the zoom finishes.
+      platformScheduleAudioWarmup(0);
+    }
+    return;
+  }
+
   platformDrawMainBackground();
 
   // title
@@ -3922,10 +4975,6 @@ function platformDrawIntro() {
   platformIntroHover = -1;
 
   for (let i = 0; i < platformAnimals.length; i++) {
-    if (platformIntroTransitionActive && i === platformIntroTransitionIndex) {
-      continue;
-    }
-
     let animal = platformAnimals[i];
     let pts = platformGetAnimatedTrianglePoints(i);
 
@@ -3971,49 +5020,6 @@ function platformDrawIntro() {
     platformText.introHint.x,
     platformText.introHint.y
   );
-
-  if (platformIntroTransitionActive && platformIntroTransitionSnapshot) {
-    let elapsed = millis() - platformIntroTransitionStart;
-    let t = constrain(elapsed / platformIntroTransitionDuration, 0, 1);
-    let e = platformEaseOutCubic(t);
-    let animal = platformAnimals[platformIntroTransitionIndex];
-    let snap = platformIntroTransitionSnapshot;
-    let pts = snap.pts;
-    let cx = snap.cx;
-    let cy = snap.cy;
-    let zoomScale = lerp(snap.startScale, snap.zoomScale, e);
-    let bgMix = constrain(map(e, 0.5, 0.9, 0, 1), 0, 1);
-
-    if (bgMix > 0) {
-      noStroke();
-      fill(lerpColor(color("#F0E8DC"), color(animal.color), bgMix));
-      rect(0, 0, platformW, platformH);
-    }
-
-    push();
-    translate(cx, cy);
-    scale(zoomScale);
-    translate(-cx, -cy);
-    noStroke();
-    fill(animal.color);
-    triangle(
-      pts[0][0], pts[0][1],
-      pts[1][0], pts[1][1],
-      pts[2][0], pts[2][1]
-    );
-    pop();
-
-    if (t >= 1) {
-      platformIntroTransitionActive = false;
-      platformIntroTransitionIndex = -1;
-      platformIntroTransitionSnapshot = null;
-      platformPosterFadeColor = animal.color;
-      platformPosterFadeDuration = 420;
-      platformPosterFadeStartTime = millis();
-      platformSkipNextSessionFade = true;
-      platformEnterAnimal(animal.id);
-    }
-  }
 }
 
 function platformGetLoadingStartIndex() {
@@ -4165,7 +5171,9 @@ function platformStartAnimalSession(animalId) {
   platformMode = animalId;
   platformLoadingTargetAnimal = null;
   platformLoadingStartTime = null;
-  platformCloseShare();
+  platformWithSuppressedUiClose(() => {
+    platformCloseShare();
+  });
   platformClearSharedPosterCaches();
   if (!posterPrepareForPlay(animalId)) {
     return;
@@ -4193,8 +5201,10 @@ function platformBeginAnimalDirect(animalId) {
     platformReturnToIntro();
     return;
   }
-  platformCloseShare();
-  platformCloseAnimalMenu();
+  platformWithSuppressedUiClose(() => {
+    platformCloseShare();
+    platformCloseAnimalMenu();
+  });
   platformStartAnimalSession(animalId);
 }
 
@@ -4202,8 +5212,10 @@ function platformEnterAnimal(animalId) {
   if (!animalId || !posterRegistry[animalId]) {
     return;
   }
-  platformCloseShare();
-  platformCloseAnimalMenu();
+  platformWithSuppressedUiClose(() => {
+    platformCloseShare();
+    platformCloseAnimalMenu();
+  });
   if (platformHasCompletedAnyPoster) {
     platformBeginAnimalDirect(animalId);
   } else {
@@ -4291,6 +5303,10 @@ function platformHandleIntroPress(x, y) {
       let cx = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
       let cy = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
 
+      // Play select FIRST in the gesture, then start zoom slightly later so
+      // the sound attack and zoom feel locked together.
+      platformAudioApplyPlaybackSession();
+      platformPlaySelectHtml();
       platformIntroTransitionSnapshot = {
         pts: [
           [pts[0][0], pts[0][1]],
@@ -4304,7 +5320,7 @@ function platformHandleIntroPress(x, y) {
       };
       platformIntroTransitionActive = true;
       platformIntroTransitionIndex = i;
-      platformIntroTransitionStart = millis();
+      platformIntroTransitionStart = millis() + platformIntroTransitionSoundLeadMs;
       return;
     }
   }
@@ -4373,6 +5389,14 @@ function platformDrawBlockTitle(lines, x, y, size, leading, fontObj, fillValue) 
 function platformTriggerCorrectFeedback(animalId) {
   let p = posterRegistry[animalId];
   if (!p) return;
+  // 1st correct → correct.wav, 2nd → correct2.wav, 3rd → great success only (complete).
+  let step = p.clickCount;
+  let finalStep = p.cfg?.finalClickCount || 3;
+  if (step === 1) {
+    platformPlaySfx("correct");
+  } else if (step === 2 && step < finalStep) {
+    platformPlaySfx("correct2");
+  }
   p.pulse.positive = 35;
   p.pulse.wrongSide = "";
   p.pulse.wrongShake = 0;
@@ -4507,11 +5531,21 @@ function platformLayoutY(refY) {
   return my(refY) * platformGetLayoutYTighten();
 }
 
+function platformGetQuestionUiKeepOutTop() {
+  // Forbidden zone starts at the question title, not the choice row — otherwise
+  // loose triangles can sit on "What would you choose?".
+  return (
+    platformText.questionTitle.y +
+    POSTER_LAYOUT.questionTitleNudgeY -
+    ms(14)
+  );
+}
+
 function platformApplyPosterViewportLayouts() {
   let belowHeader = posterGetBelowHeaderNudgeY();
   POSTER_LAYOUT.looseDefaultTop = platformLayoutY(120) + belowHeader;
   POSTER_LAYOUT.looseDefaultBottom = platformLayoutY(720) + belowHeader;
-  POSTER_LAYOUT.choiceKeepOutTop = platformLayoutY(670) + belowHeader;
+  POSTER_LAYOUT.choiceKeepOutTop = platformGetQuestionUiKeepOutTop();
   POSTER_LAYOUT.eagleScatterTop = platformLayoutY(208) + belowHeader;
   POSTER_LAYOUT.eagleHeaderFloorInit = platformLayoutY(128) + belowHeader;
   POSTER_LAYOUT.eagleHeaderFloorAdjust = platformLayoutY(200) + belowHeader;
@@ -4533,12 +5567,12 @@ function platformApplyPosterViewportLayouts() {
       composition.bottom =
         refs.compBottom != null
           ? platformLayoutY(refs.compBottom) + belowHeader
-          : POSTER_LAYOUT.choiceY - ms(48);
+          : platformGetQuestionUiKeepOutTop() - ms(24);
     }
 
     let keepOut = p.cfg.loosePiece && p.cfg.loosePiece.choiceKeepOut;
     if (keepOut) {
-      keepOut.top = POSTER_LAYOUT.choiceY;
+      keepOut.top = platformGetQuestionUiKeepOutTop();
       keepOut.bottom = platformH;
     }
   }
@@ -4550,13 +5584,22 @@ function platformApplyViewportLayout() {
   platformText.introTitle.y = platformLayoutY(110) + ms(20) + INTRO_SCREEN_NUDGE_Y;
   platformText.introHint.y = platformLayoutY(620) + ms(160) + INTRO_SCREEN_NUDGE_Y;
   platformText.loadingHint.y = platformLayoutY(560) - ms(120);
-  platformText.questionTitle.y =
-    platformLayoutY(920) + POSTER_LAYOUT.questionPhaseNudgeY + posterGetBelowHeaderNudgeY();
   platformApplyChoiceLayoutMetrics();
   POSTER_LAYOUT.headerLineY = platformLayoutY(60) + ms(20);
   POSTER_LAYOUT.headerTextY = platformLayoutY(34) + ms(5) + ms(20);
+  // Keep the choice block where it already sat, and place the question
+  // title directly above it.
+  let questionBlockBottom =
+    platformLayoutY(920) +
+    POSTER_LAYOUT.questionPhaseNudgeY +
+    platformGetSafariQuestionNudgeY() +
+    posterGetBelowHeaderNudgeY();
   POSTER_LAYOUT.choiceY =
-    platformText.questionTitle.y - POSTER_LAYOUT.choiceH - ms(35);
+    questionBlockBottom - POSTER_LAYOUT.choiceH - ms(35);
+  platformText.questionTitle.y =
+    POSTER_LAYOUT.choiceY -
+    platformText.questionTitle.leading -
+    ms(14);
   POSTER_LAYOUT.answerTop = platformLayoutY(715) + posterGetBelowHeaderNudgeY();
   POSTER_LAYOUT.footerTop = platformLayoutY(882) + posterGetBelowHeaderNudgeY();
   POSTER_LAYOUT.finalTextCenterOffset = platformLayoutY(24);
@@ -4587,6 +5630,13 @@ function platformBindViewportListeners() {
 
   let update = () => {
     platformApplyViewportLayout();
+    platformClearSharedPosterCaches();
+    for (let id in posterRegistry) {
+      let p = posterRegistry[id];
+      if (p && (p.leftBox || p.rightBox)) {
+        posterRefreshChoiceBoxes(p);
+      }
+    }
   };
 
   window.addEventListener("resize", update);
@@ -4673,7 +5723,7 @@ const platformLooseGroupBBoxCache = {};
 const platformPelobatesTargetCache = {};
 let platformLooseRepelFrameCache = null;
 const platformChoiceImageVisualOffsetCache = new WeakMap();
-const platformLooseLayoutVersion = 93;
+const platformLooseLayoutVersion = 96;
 const PLATFORM_LOOSE_ROT_PAD = 24;
 const PLATFORM_LOOSE_STROKE_PAD = 3;
 
@@ -5202,6 +6252,14 @@ function platformLooseScatterUVForIndex(index, count, opts = {}) {
   };
 }
 
+function platformGetEagleScatterCeilingScreenY() {
+  return (
+    platformGetQuestionUiKeepOutTop() +
+    platformGetChoiceLayoutNudgeY() -
+    ms(16)
+  );
+}
+
 function platformLooseCircularGoalScreen(index, count, cfg, layout = {}) {
   let zone = layout.zone || platformLooseGetProfile(cfg).composition;
   let pad = ms(8);
@@ -5217,7 +6275,7 @@ function platformLooseCircularGoalScreen(index, count, cfg, layout = {}) {
       platformGetChoiceLayoutNudgeY();
   } else if (cfg.id === "eagle") {
     top = zone.top - ms(4);
-    bottom = POSTER_LAYOUT.choiceY - ms(44) + platformGetChoiceLayoutNudgeY();
+    bottom = platformGetEagleScatterCeilingScreenY() - ms(4);
   } else {
     bottom =
       min(bottom, POSTER_LAYOUT.choiceY - ms(72)) +
@@ -5348,11 +6406,7 @@ function platformLooseCircularAdjustLooseTargets(targets, cfg) {
   }
 
   if (cfg.id === "eagle") {
-    let keepOut = platformLooseGetProfile(cfg).choiceKeepOut;
-    let ceilingScreenY =
-      keepOut
-        ? keepOut.top + platformGetChoiceLayoutNudgeY() - ms(40)
-        : platformH;
+    let ceilingScreenY = platformGetEagleScatterCeilingScreenY();
     let headerFloor = POSTER_LAYOUT.eagleHeaderFloorInit;
 
     for (let i = 0; i < targets.length; i++) {
@@ -5378,29 +6432,67 @@ function platformLooseCircularAdjustLooseTargets(targets, cfg) {
       box = platformLoosePieceScreenBBox(cfg, targets[i].x, targets[i].y, i, rot, true);
 
       if (box.bottom > ceilingScreenY) {
-        targets[i] = platformLooseClampTargetAboveChoice(
-          cfg,
-          targets[i].x,
-          targets[i].y,
-          i,
-          rot
+        targets[i] = platformLooseShiftTargetScreen(
+          targets[i],
+          0,
+          ceilingScreenY - box.bottom,
+          cfg
         );
       }
     }
   }
 }
 
+function eagleClampTargetOnCanvas(target, cfg, index, rot = 0) {
+  let inset = mx(10);
+  let left = inset;
+  let right = platformW - inset;
+  let top = POSTER_LAYOUT.eagleHeaderFloorAdjust;
+  let bottom = platformGetEagleScatterCeilingScreenY();
+  let ox = target.x;
+  let oy = target.y;
+
+  for (let iter = 0; iter < 10; iter++) {
+    let box = platformLoosePieceScreenBBox(cfg, ox, oy, index, rot, true);
+    let dx = 0;
+    let dy = 0;
+
+    if (box.left < left) {
+      dx += left - box.left;
+    }
+    if (box.right > right) {
+      dx -= box.right - right;
+    }
+    if (box.top < top) {
+      dy += top - box.top;
+    }
+    if (box.bottom > bottom) {
+      dy -= box.bottom - bottom;
+    }
+
+    if (abs(dx) < 0.05 && abs(dy) < 0.05) {
+      break;
+    }
+
+    let shifted = platformLooseShiftTargetScreen({ x: ox, y: oy }, dx, dy, cfg);
+    ox = shifted.x;
+    oy = shifted.y;
+  }
+
+  return { x: ox, y: oy };
+}
+
 function eagleAssignScatterSlots(targets, cfg) {
-  let left = mx(12);
-  let right = platformW - mx(12);
+  let left = mx(28);
+  let right = platformW - mx(28);
   let top = POSTER_LAYOUT.eagleScatterTop;
-  let bottom =
-    POSTER_LAYOUT.choiceY - ms(54) + platformGetChoiceLayoutNudgeY();
+  let bottom = platformGetEagleScatterCeilingScreenY() - ms(8);
+  // Keep UV slots inward so pieces don't spawn past the screen edges.
   let slotUV = [
-    [0.82, 0.04], [0.96, 0.03], [0.70, 0.07], [0.90, 0.13],
-    [0.06, 0.22], [0.20, 0.34], [0.03, 0.46], [0.14, 0.56], [0.05, 0.66], [0.18, 0.76],
-    [0.96, 0.30], [0.84, 0.42], [0.97, 0.52], [0.88, 0.64],
-    [0.28, 0.82], [0.48, 0.94], [0.16, 0.96], [0.74, 0.92], [0.40, 0.70]
+    [0.78, 0.06], [0.90, 0.08], [0.66, 0.10], [0.86, 0.16],
+    [0.12, 0.24], [0.24, 0.34], [0.10, 0.46], [0.20, 0.56], [0.14, 0.64], [0.26, 0.70],
+    [0.88, 0.30], [0.78, 0.42], [0.90, 0.52], [0.80, 0.62],
+    [0.34, 0.72], [0.50, 0.78], [0.22, 0.80], [0.68, 0.76], [0.44, 0.66]
   ];
 
   for (let i = 0; i < targets.length; i++) {
@@ -5420,9 +6512,9 @@ function eagleAssignScatterSlots(targets, cfg) {
 }
 
 function eagleSeparateLooseTargets(targets, cfg) {
-  let gap = ms(40);
+  let gap = ms(28);
 
-  for (let iter = 0; iter < 72; iter++) {
+  for (let iter = 0; iter < 56; iter++) {
     let moved = false;
 
     for (let a = 0; a < targets.length; a++) {
@@ -5444,7 +6536,7 @@ function eagleSeparateLooseTargets(targets, cfg) {
           continue;
         }
 
-        let push = ((need - dist) / dist) * 0.58;
+        let push = ((need - dist) / dist) * 0.5;
         let sx = dx * push;
         let sy = dy * push;
 
@@ -6179,7 +7271,7 @@ function toadAdjustLooseTargets(targets, cfg) {
 }
 
 function eagleAdjustLooseTargets(targets, cfg) {
-  let zone = platformLooseGetProfile(cfg).layout.zone;
+  let zone = platformLooseGetProfile(cfg).composition;
 
   if (!zone || !cfg.getPieceGroup) {
     return;
@@ -6187,37 +7279,10 @@ function eagleAdjustLooseTargets(targets, cfg) {
 
   eagleAssignScatterSlots(targets, cfg);
   eagleSeparateLooseTargets(targets, cfg);
-
-  let keepOut = platformLooseGetProfile(cfg).choiceKeepOut;
-  let ceilingScreenY =
-    keepOut
-      ? keepOut.top + platformGetChoiceLayoutNudgeY() - (keepOut.pad ?? ms(10)) - ms(6)
-      : platformH;
-  let headerFloor = POSTER_LAYOUT.eagleHeaderFloorAdjust;
+  eagleAssignScatterSlots(targets, cfg);
 
   for (let i = 0; i < targets.length; i++) {
-    let box = platformLoosePieceScreenBBox(cfg, targets[i].x, targets[i].y, i, 0, true);
-
-    if (box.top < headerFloor) {
-      targets[i] = platformLooseShiftTargetScreen(
-        targets[i],
-        0,
-        headerFloor - box.top,
-        cfg
-      );
-    }
-
-    box = platformLoosePieceScreenBBox(cfg, targets[i].x, targets[i].y, i, 0, true);
-
-    if (box.bottom > ceilingScreenY) {
-      targets[i] = platformLooseClampTargetAboveChoice(
-        cfg,
-        targets[i].x,
-        targets[i].y,
-        i,
-        0
-      );
-    }
+    targets[i] = eagleClampTargetOnCanvas(targets[i], cfg, i, 0);
   }
 }
 
@@ -8532,7 +9597,7 @@ function platformDrawQuestionTitle(textColor) {
 }
 
 function platformGetWrongTryAgainY() {
-  return POSTER_LAYOUT.choiceY - ms(34) + 30;
+  return platformText.questionTitle.y + POSTER_LAYOUT.questionTitleNudgeY;
 }
 
 function platformGetWrongTryAgainAlpha(p) {
@@ -8622,11 +9687,42 @@ function platformGetProgressPillFillAmt(p, index, currentIndex) {
   return 0;
 }
 
+function platformDrawProgressPillContrastShadow(bx, by, bw, bh, strength = 1) {
+  let ctx = drawingContext;
+  let r = bh / 2;
+
+  ctx.save();
+  ctx.filter = `blur(${ms(5)}px)`;
+  platformRoundRectPath(ctx, bx, by + ms(1.2), bw, bh, r);
+  ctx.fillStyle = `rgba(132, 124, 114, ${0.11 * strength})`;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.filter = `blur(${ms(2.5)}px)`;
+  platformRoundRectPath(ctx, bx, by + ms(0.6), bw, bh, r);
+  ctx.fillStyle = `rgba(132, 124, 114, ${0.08 * strength})`;
+  ctx.fill();
+  ctx.restore();
+}
+
+function platformStrokeProgressPillEdge(bx, by, bw, bh, alpha = 0.14) {
+  let ctx = drawingContext;
+  let r = bh / 2;
+  ctx.save();
+  platformRoundRectPath(ctx, bx + 0.5, by + 0.5, bw - 1, bh - 1, r - 0.5);
+  ctx.strokeStyle = `rgba(148, 140, 130, ${alpha})`;
+  ctx.lineWidth = ms(0.85);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function platformDrawProgressPill(cx, y, pillW, pillH, pillR, fillAmt) {
   let bx = cx - pillW / 2;
   let by = y - pillH / 2;
   let [br, bg, bb] = PLATFORM_TEXT_RGB;
 
+  platformDrawProgressPillContrastShadow(bx, by, pillW, pillH, 1);
   platformDrawLiquidGlassPillSurface(
     bx,
     by,
@@ -8640,13 +9736,16 @@ function platformDrawProgressPill(cx, y, pillW, pillH, pillR, fillAmt) {
     1,
     "light"
   );
+  platformStrokeProgressPillEdge(bx, by, pillW, pillH, 0.12);
 
   if (fillAmt <= 0) {
     return;
   }
 
   if (fillAmt >= 1) {
+    platformDrawProgressPillContrastShadow(bx, by, pillW, pillH, 0.55);
     platformDrawLiquidGlassPillSurface(bx, by, pillW, pillH, br, bg, bb, 1, false);
+    platformStrokeProgressPillEdge(bx, by, pillW, pillH, 0.16);
     return;
   }
 
@@ -8655,7 +9754,9 @@ function platformDrawProgressPill(cx, y, pillW, pillH, pillR, fillAmt) {
   ctx.save();
   platformRoundRectPath(ctx, bx, by, fw, pillH, pillR);
   ctx.clip();
+  platformDrawProgressPillContrastShadow(bx, by, pillW, pillH, 0.55);
   platformDrawLiquidGlassPillSurface(bx, by, pillW, pillH, br, bg, bb, 1, false);
+  platformStrokeProgressPillEdge(bx, by, pillW, pillH, 0.16);
   ctx.restore();
 }
 
@@ -8885,7 +9986,7 @@ const POSTER_LAYOUT = {
   choiceBtnH: ms(147),
   choiceH: ms(147) + ms(18) + ms(50),
   choiceLabelGap: ms(18),
-  choiceY: platformText.questionTitle.y - ms(162) - ms(35),
+  choiceY: my(920) - ms(162) - ms(35),
   answerTop: my(715),
   footerTop: my(882),
   finalTextCenterOffset: my(24),
@@ -8959,10 +10060,11 @@ const POSTER_LAYOUT = {
   shareSheetIconR: ms(34),
   shareSheetIconDrawPad: ms(8),
   frameStrokeWeight: 0.9,
-  questionPhaseNudgeY: -10,
+  questionPhaseNudgeY: 6,
+  questionPhaseSafariNudgeY: 28,
   questionPlayNudgeY: 20,
   choicePanelNudgeY: -8,
-  questionTitleNudgeY: -12,
+  questionTitleNudgeY: ms(10),
   progressHeaderNudgeX: 0,
   progressHeaderNudgeY: 10,
   progressGapBelowHeaderLine: ms(18),
@@ -9301,6 +10403,8 @@ const posterRegistry = {
       scatter: { x: 0, y: 0 },
       hyenaStyleRepel: true,
       assembleClearance: ms(20),
+      // Slot layout (not circular) keeps loose triangles on-canvas; ceiling is enforced
+      // in eagleAssignScatterSlots via platformGetEagleScatterCeilingScreenY.
       drawTransform: {
         originX: ANIMAL_REF_W / 2 - 42,
         originY: PLATFORM_EAGLE_FINAL_ORIGIN_Y,
@@ -9312,29 +10416,13 @@ const posterRegistry = {
         left: mx(28),
         right: platformW - mx(28),
         top: my(100),
-        bottom: POSTER_LAYOUT.choiceY - ms(48),
+        bottom: null,
         pad: ms(4),
         edgePad: ms(10)
       },
       layout: {
         type: "zone",
-        zoneMode: "circular",
-        centerU: 0.5,
-        centerV: 0.54,
-        coreCount: 8,
-        coreInner: 0.02,
-        coreOuter: 0.20,
-        corePow: 0.5,
-        outerInner: 0.06,
-        outerOuter: 0.50,
-        outerPow: 0.42,
-        radiusScaleX: 1.08,
-        radiusScaleY: 2.48,
-        uMin: 0.06,
-        uMax: 0.94,
-        vMin: 0,
-        vMax: 0.98,
-        screenShift: { x: 0, y: 8 },
+        zoneMode: "slots",
         placement: "bbox"
       },
       floatAmp: 5,
@@ -9473,15 +10561,14 @@ const posterRegistry = {
     feedback: { rgb: true, y: my(690) },
     pipeline: ["bg", "animal", "finalTimer", "question", "footer", "feedback", "frame", "header"],
     resetFinalOnCorrect: true,
-    requiresFullAssemblyForFinal: true,
     nextClickCount(stage) { return stage + 1; },
     isFullyAssembled(p) {
       return (
         p.clickCount >= 3 &&
-        p.tGroup[0] > 0.995 &&
-        p.tGroup[1] > 0.995 &&
-        p.tGroup[2] > 0.995 &&
-        p.tGroup[3] > 0.995
+        p.tGroup[0] > 0.96 &&
+        p.tGroup[1] > 0.96 &&
+        p.tGroup[2] > 0.96 &&
+        p.tGroup[3] > 0.96
       );
     },
     randomSeed: 140,
@@ -9718,6 +10805,9 @@ function posterRestartFromWrongAnswer(p) {
   p.toadRepelBoost = 0;
   p.finalStart = null;
   p.jumpReadyTime = null;
+  p.jumpDelayMs = 0;
+  p.toadFirstJumpDone = false;
+  p.audioFinalRevealPlayed = false;
 }
 
 function posterReset(p) {
@@ -9736,6 +10826,9 @@ function posterReset(p) {
   p.finalStart = null;
   p.finalActionBoxes = null;
   p.jumpReadyTime = null;
+  p.jumpDelayMs = 0;
+  p.toadFirstJumpDone = false;
+  p.audioFinalRevealPlayed = false;
   p.finalMotion = 0;
   p.deer = {
     x: PLATFORM_DEER_FINAL_ORIGIN_X,
@@ -9848,6 +10941,13 @@ function posterUpdateFinalTimer(p) {
   }
   if (p.finalStart === null) {
     p.finalStart = millis();
+    if (p.id !== "toad") {
+      platformNotifyFinalReveal(p);
+    }
+  }
+  // Toad great-success SFX when pieces lock (text already started on 3rd click).
+  if (p.id === "toad" && cfg.isFullyAssembled && cfg.isFullyAssembled(p)) {
+    platformNotifyFinalReveal(p);
   }
 }
 
@@ -9866,6 +10966,7 @@ function platformHandlePosterBackPress() {
   }
 
   if (platformWasBoxClicked(p.backButtonBox)) {
+    platformPlayUiOpenSfx();
     platformReturnToIntro();
     return true;
   }
@@ -10295,11 +11396,16 @@ function posterHandleChoicePress(id) {
       platformHasCompletedAnyPoster = true;
       if (!cfg.requiresFullAssemblyForFinal) {
         p.finalStart = millis();
+        // Toad lock-in SFX waits for visual assembly; text timer starts now like others.
+        if (id !== "toad") {
+          platformNotifyFinalReveal(p);
+        }
       }
     }
     platformTriggerCorrectFeedback(id);
   } else if (clickedWrong) {
     if (!p.wrongFallActive && !p.wrongWaitActive && !p.wrongRiseActive) {
+      platformPlaySfx("wrong");
       p.wrongFallActive = true;
       p.wrongFallT = 0;
       p.wrongWaitActive = false;
@@ -10321,6 +11427,7 @@ function posterMousePressed(id) {
 function posterHandleNavigationPress(id) {
   let p = posterRegistry[id];
   if (p?.backButtonBox && platformWasBoxClicked(p.backButtonBox)) {
+    platformPlayUiOpenSfx();
     platformReturnToIntro();
     return true;
   }
@@ -11226,6 +12333,7 @@ function drawDeerPieceTri(hexColor, p1, p2, p3, index, t) {
 }
 
 const PELOBATES_JUMP_DELAY = 420;
+const PELOBATES_FIRST_JUMP_DELAY = 0;
 
 function pelobatesMovePoint(p, dx, dy) {
   return [p[0] + dx, p[1] + dy];
@@ -11305,16 +12413,24 @@ function drawPelobatesAnimal() {
   if (fullyAssembled) {
     if (p.jumpReadyTime === null) {
       p.jumpReadyTime = millis();
+      // First full assembly: start jump immediately like other animals' settle.
+      // Later cycles keep the longer pre-jump pause.
+      p.jumpDelayMs = p.toadFirstJumpDone
+        ? PELOBATES_JUMP_DELAY
+        : PELOBATES_FIRST_JUMP_DELAY;
     }
   } else {
     p.jumpReadyTime = null;
   }
 
+  let jumpDelay =
+    p.jumpDelayMs == null ? PELOBATES_JUMP_DELAY : p.jumpDelayMs;
+
   let jumpActive =
     !platformSharePreviewStill &&
     fullyAssembled &&
     p.jumpReadyTime !== null &&
-    millis() - p.jumpReadyTime >= PELOBATES_JUMP_DELAY;
+    millis() - p.jumpReadyTime >= jumpDelay;
 
   let animalX = ANIMAL_REF_W / 2 - 5;
   let animalY = 432;
@@ -11331,8 +12447,11 @@ function drawPelobatesAnimal() {
   let settleAmt = 0;
 
   if (jumpActive) {
+    if (!p.toadFirstJumpDone) {
+      p.toadFirstJumpDone = true;
+    }
     let cycleDuration = 2150;
-    let elapsed = millis() - p.jumpReadyTime - PELOBATES_JUMP_DELAY;
+    let elapsed = millis() - p.jumpReadyTime - jumpDelay;
     let phase = (elapsed % cycleDuration) / cycleDuration;
 
     if (phase < 0.24) {
@@ -11578,8 +12697,10 @@ let hyenaLooseTargetCache = null;
 let hyenaLooseTargetCacheH = 0;
 let hyenaLooseTargetCacheVersion = 0;
 const HYENA_LOOSE_PIECES = 80;
-const HYENA_LOOSE_LAYOUT_VERSION = 11;
+const HYENA_LOOSE_LAYOUT_VERSION = 13;
 const HYENA_SCATTER_OFFSET_Y = 16;
+// Lift loose/scattered triangles only — assembled connections & final pose stay put.
+const HYENA_SCATTER_NUDGE_Y = -42;
 const HYENA_SCATTER_EXPAND_Y = 28;
 const HYENA_SCATTER_EXPAND_X = 10;
 const HYENA_CIRCULAR_LAYOUT = {
@@ -11605,13 +12726,15 @@ function hyenaGetScatterBounds() {
   let topScreen =
     platformText.introTitle.y +
     ms(52) +
-    ms(HYENA_SCATTER_OFFSET_Y) -
+    ms(HYENA_SCATTER_OFFSET_Y) +
+    ms(HYENA_SCATTER_NUDGE_Y) -
     ms(HYENA_SCATTER_EXPAND_Y) +
     posterGetBelowHeaderNudgeY();
   let bottomScreen =
     POSTER_LAYOUT.choiceY -
     ms(22) +
     ms(HYENA_SCATTER_OFFSET_Y) +
+    ms(HYENA_SCATTER_NUDGE_Y) +
     ms(HYENA_SCATTER_EXPAND_Y) +
     platformGetChoiceLayoutNudgeY();
   let sidePad = max(4, 16 - HYENA_SCATTER_EXPAND_X);
