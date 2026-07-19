@@ -26,9 +26,10 @@ jobs:
 
       - name: Prepare site artifact
         run: |
-          mkdir -p _site
+          mkdir -p _site/sfx
           cp index.html sketch.js style.css _site/
           cp *.png *.otf _site/ 2>/dev/null || true
+          cp sfx/* _site/sfx/ 2>/dev/null || true
           cp .nojekyll _site/
 
       - name: Setup Pages

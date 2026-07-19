@@ -3,8 +3,10 @@
 // Native mobile portrait layout (390×844)
 // =====================================================
 
+// --- Globals & scaling ---
+// App mode, share/menu state, viewport size helpers (mx/my/ms).
+
 let platformMode = "intro"; // intro | turtle | eagle | deer | toad | hyena
-let platformMeshGrainGfx = null;
 let platformSelectedStarted = false;
 let platformSessionAnimalId = null;
 let platformIntroHover = -1;
@@ -119,7 +121,6 @@ let platformAudioCtx = null;
 let platformAudioMaster = null;
 let platformAudioUnlocked = false;
 let platformAudioMuted = false;
-let platformAudioMuteEl = null;
 let platformAudioSilentEl = null;
 let platformAudioSelectEl = null;
 let platformAudioHtmlEls = Object.create(null);
@@ -129,7 +130,6 @@ let platformAudioBufferPromises = Object.create(null);
 let platformAudioActiveSources = [];
 let platformAudioGestureBound = false;
 let platformIgnoreNextMousePress = false;
-const PLATFORM_AUDIO_MUTE_KEY = "platformAudioMuted";
 const PLATFORM_AUDIO_MASTER_GAIN = 0.42;
 const PLATFORM_SFX_SAMPLE_V = 22;
 const PLATFORM_SFX_SAMPLE_URLS = {
@@ -154,9 +154,6 @@ function ms(s) {
 
 const PLATFORM_TITLE_Y = my(110) + 20;
 const PLATFORM_BG_COLOR = "#F4EBDD";
-// Mesh bg — clean blush wisp + warm caramel accent on pure white.
-const PLATFORM_MESH_WISP = [252, 236, 220];
-const PLATFORM_MESH_ACCENT = [210, 170, 128];
 const PLATFORM_TEXT_COLOR = "#4E463D";
 const PLATFORM_TEXT_RGB = [78, 70, 61];
 const PLATFORM_UI_ICON_V = 8;
@@ -747,8 +744,6 @@ function platformDrawBlurredSnapIntoRect(ctx, snap, blurred, x, y, w, h) {
   return true;
 }
 
-const PLATFORM_SHARE_BACK_NUDGE_Y = ms(10);
-const PLATFORM_SHARE_ICONS_NUDGE_Y = ms(10);
 const PLATFORM_LOADING_TRIANGLE_SIZE = mx(72);
 
 function platformGetLoadingTriangleCy() {
@@ -1055,21 +1050,8 @@ function platformApplyStartupQuery() {
   }
 }
 
-function platformAudioLoadMutePreference() {
-  try {
-    platformAudioMuted = localStorage.getItem(PLATFORM_AUDIO_MUTE_KEY) === "1";
-  } catch (e) {
-    platformAudioMuted = false;
-  }
-}
-
-function platformAudioSaveMutePreference() {
-  try {
-    localStorage.setItem(PLATFORM_AUDIO_MUTE_KEY, platformAudioMuted ? "1" : "0");
-  } catch (e) {
-    // ignore quota / private mode
-  }
-}
+// --- Audio ---
+// HTMLAudio samples for iOS reliability; Web Audio fallbacks / UI plucks.
 
 function platformAudioApplyPlaybackSession() {
   // iOS: default Web Audio is "ambient" and follows the mute switch.
@@ -1276,10 +1258,6 @@ function platformWarmUiPluckHtml() {
       platformEnsurePluckHtmlEl(patch);
     }
   });
-}
-
-function platformEnsureSelectAudioEl() {
-  return platformEnsureHtmlSampleEl("select");
 }
 
 function platformPlaySelectHtml() {
@@ -1494,86 +1472,6 @@ function platformBindAudioGestureUnlock() {
   window.addEventListener("pointerdown", kick, { capture: true });
 }
 
-function platformAudioSetMuted(muted) {
-  platformAudioMuted = !!muted;
-  platformAudioSaveMutePreference();
-  if (platformAudioMaster) {
-    let ctx = platformAudioCtx;
-    let now = ctx ? ctx.currentTime : 0;
-    platformAudioMaster.gain.cancelScheduledValues(now);
-    platformAudioMaster.gain.setValueAtTime(
-      platformAudioMuted ? 0 : PLATFORM_AUDIO_MASTER_GAIN,
-      now
-    );
-  }
-  if (platformAudioSelectEl) {
-    platformAudioSelectEl.muted = platformAudioMuted;
-    platformAudioSelectEl.volume = platformAudioMuted ? 0 : 0.55;
-  }
-  Object.keys(platformAudioHtmlEls).forEach((key) => {
-    let el = platformAudioHtmlEls[key];
-    if (!el) {
-      return;
-    }
-    el.muted = platformAudioMuted;
-    el.volume = platformAudioMuted ? 0 : 0.55;
-  });
-  platformAudioSyncMuteButton();
-}
-
-function platformAudioToggleMute() {
-  platformAudioUnlock().then(() => {
-    platformAudioSetMuted(!platformAudioMuted);
-    if (!platformAudioMuted) {
-      platformPlaySfx("progress");
-    }
-  });
-}
-
-function platformAudioMuteIconSvg(muted) {
-  if (muted) {
-    return (
-      '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-      '<path d="M4 9v6h3.5L12 19V5L7.5 9H4z" fill="#4E463D"/>' +
-      '<path d="M15.5 9.5l5 5M20.5 9.5l-5 5" stroke="#4E463D" stroke-width="1.7" stroke-linecap="round"/>' +
-      "</svg>"
-    );
-  }
-  return (
-    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">' +
-    '<path d="M4 9v6h3.5L12 19V5L7.5 9H4z" fill="#4E463D"/>' +
-    '<path d="M15.2 8.4a4.2 4.2 0 0 1 0 7.2" stroke="#4E463D" stroke-width="1.6" stroke-linecap="round"/>' +
-    '<path d="M17.4 6.2a7 7 0 0 1 0 11.6" stroke="#4E463D" stroke-width="1.6" stroke-linecap="round"/>' +
-    "</svg>"
-  );
-}
-
-function platformAudioSyncMuteButton() {
-  let el = platformAudioMuteEl;
-  if (!el) {
-    return;
-  }
-  el.innerHTML = platformAudioMuteIconSvg(platformAudioMuted);
-  el.setAttribute("aria-label", platformAudioMuted ? "Unmute sound" : "Mute sound");
-  el.setAttribute("aria-pressed", platformAudioMuted ? "true" : "false");
-}
-
-function platformEnsureMuteButton() {
-  // Mute control removed from the UI.
-  return null;
-}
-
-function platformRemoveMuteButton() {
-  if (typeof document === "undefined") {
-    return;
-  }
-  let el = platformAudioMuteEl || document.getElementById("platform-audio-mute");
-  if (el && el.parentNode) {
-    el.parentNode.removeChild(el);
-  }
-  platformAudioMuteEl = null;
-}
-
 function platformAudioVoiceAt(freq, start, dur, gain, opts = {}) {
   let ctx = platformEnsureAudio();
   if (!ctx || !platformAudioMaster) {
@@ -1694,36 +1592,6 @@ function platformPlayWrongSfx(t0) {
       attack: 0.009
     });
   }
-}
-
-function platformPlayCompleteSfx(t0) {
-  // Big fun finale when the animal locks together.
-  platformAudioVoiceAt(130.81, t0, 0.55, 0.11, {
-    type: "sine",
-    bright: 0.08,
-    attack: 0.02
-  });
-  platformAudioNoiseBurst(t0, 0.08, 0.055, { freq: 220, q: 0.7 });
-
-  let rise = [261.63, 329.63, 392.0, 523.25, 659.25, 783.99, 1046.5];
-  for (let i = 0; i < rise.length; i++) {
-    platformAudioVoiceAt(rise[i], t0 + 0.04 + i * 0.07, 0.42, 0.1 - i * 0.008, {
-      type: i % 2 === 0 ? "triangle" : "sine",
-      bright: 0.32,
-      attack: 0.006
-    });
-  }
-
-  // Sparkle shimmer on top
-  let sparkle = [1318.5, 1568.0, 2093.0, 2637.0];
-  for (let i = 0; i < sparkle.length; i++) {
-    platformAudioVoiceAt(sparkle[i], t0 + 0.28 + i * 0.05, 0.35, 0.045, {
-      type: "sine",
-      bright: 0.4,
-      attack: 0.004
-    });
-  }
-  platformAudioNoiseBurst(t0 + 0.3, 0.14, 0.04, { freq: 3200, q: 0.5, highpass: true });
 }
 
 function platformPlaySfx(name) {
@@ -1905,6 +1773,9 @@ function platformNotifyFinalReveal(p) {
   setTimeout(playComplete, delayMs);
 }
 
+// --- p5 lifecycle ---
+// setup / draw / mouse / touch / resize / Escape routing.
+
 function setup() {
   pixelDensity(displayDensity());
   let cnv = createCanvas(platformW, platformH);
@@ -1919,7 +1790,6 @@ function setup() {
   platformAudioApplyPlaybackSession();
   platformEnsureSilentMediaUnlock();
   platformPreloadAllHtmlSamples();
-  platformRemoveMuteButton();
   platformBindAudioGestureUnlock();
   platformProcessLineArtImages();
   platformBindViewportListeners();
@@ -2105,6 +1975,10 @@ function keyPressed() {
     platformReturnToIntro();
   }
 }
+
+// --- Final poster dock & liquid-glass UI ---
+// Home / share / menu dock, glass buttons, final text layout.
+
 function platformIsCurrentPosterFinal() {
   let p = posterRegistry[platformMode];
   return p && p.clickCount >= p.cfg.finalClickCount;
@@ -2112,27 +1986,6 @@ function platformIsCurrentPosterFinal() {
 
 function platformGetFinalBodyLeading(cfg) {
   return cfg?.finalBody?.leading ?? POSTER_LAYOUT.finalBodyLeading;
-}
-
-function platformGetFinalContentBottom(p) {
-  let cfg = p.cfg;
-  let bodySize = ms(20);
-  let bodyLeading = platformGetFinalBodyLeading(cfg);
-  let bodyY =
-    platformGetFinalBodyTopY() +
-    POSTER_LAYOUT.finalContentYOffset +
-    POSTER_LAYOUT.finalMessageNudgeY +
-    POSTER_LAYOUT.finalPosterNudgeY;
-  let bodyLineCount = cfg.finalBody.text.split("\n").length;
-  let actualBodyBlockH = (bodyLineCount - 1) * bodyLeading + bodySize;
-  let referenceBodyBlockH =
-    (POSTER_LAYOUT.finalBodyLineCount - 1) * bodyLeading + bodySize;
-  let titleLineCount = platformText.finalTitle.lines.length;
-  let titleBlockH =
-    (titleLineCount - 1) * platformText.finalTitle.leading + platformText.finalTitle.size;
-  let titleY =
-    bodyY + (referenceBodyBlockH - titleBlockH) / 2 + POSTER_LAYOUT.finalTitleYOffset;
-  return max(titleY + titleBlockH, bodyY + actualBodyBlockH);
 }
 
 function platformGetTripleIconCentersInBar(barX, barW, padX) {
@@ -2151,16 +2004,6 @@ function platformGetShareSheetIconCenters() {
     barX,
     barW,
     POSTER_LAYOUT.shareSheetIconsPadX
-  );
-}
-
-function platformGetFinalActionBarIconCenters() {
-  let barW = POSTER_LAYOUT.finalActionBarW;
-  let barX = (platformW - barW) / 2;
-  return platformGetTripleIconCentersInBar(
-    barX,
-    barW,
-    POSTER_LAYOUT.finalActionBarPadX
   );
 }
 
@@ -2226,20 +2069,6 @@ function platformGetViewportCanvasBottomY() {
   }
   let vp = platformGetViewportSize();
   return min(layoutBottom, vp.h / scale);
-}
-
-function platformGetVisibleCanvasBottomY() {
-  let layoutBottom = platformLayoutY(REF_H);
-  if (typeof window === "undefined") {
-    return layoutBottom;
-  }
-  let scale = platformScreenScale || 1;
-  if (scale <= 0) {
-    return layoutBottom;
-  }
-  let vp = platformGetViewportSize();
-  let visibleBottom = vp.h / scale - platformGetSafeAreaInsetBottomPx() / scale;
-  return min(layoutBottom, visibleBottom);
 }
 
 function platformEnsureFinalDockBleedEl() {
@@ -2508,18 +2337,6 @@ function platformClipCircle(ctx, cx, cy, radius) {
   ctx.closePath();
 }
 
-function platformDrawSnapshotCircle(snap, cx, cy, radius) {
-  if (!snap) {
-    return;
-  }
-  let ctx = drawingContext;
-  ctx.save();
-  platformClipCircle(ctx, cx, cy, radius);
-  ctx.clip();
-  ctx.drawImage(snap.canvas, 0, 0, platformW, platformH);
-  ctx.restore();
-}
-
 const CHOICE_BUTTON_SCALE = 0.7;
 const CHOICE_IMAGE_SCALE = 0.9025;
 
@@ -2533,19 +2350,6 @@ function platformApplyChoiceLayoutMetrics() {
     POSTER_LAYOUT.choiceBtnSize +
     POSTER_LAYOUT.choiceLabelGap +
     ms(50);
-}
-
-function platformDrawLiquidGlassButton(
-  bx,
-  by,
-  w,
-  h,
-  cornerR,
-  accentColor,
-  alpha = 255,
-  hover = false
-) {
-  platformDrawFrostedGlass(bx, by, w, h, cornerR, accentColor, hover, alpha);
 }
 
 function platformFillLiquidGlassInterior(
@@ -2919,76 +2723,6 @@ function platformDrawLiquidGlassPillSurface(
   platformStrokeLiquidGlassPillRim(ctx, bx, by, bw, bh, hover, a);
 }
 
-function platformDrawLiquidGlassPill(bx, by, bw, bh, hover = false, alpha = 255) {
-  platformDrawLiquidGlassPillSurface(
-    bx,
-    by,
-    bw,
-    bh,
-    255,
-    255,
-    255,
-    alpha / 255,
-    hover
-  );
-}
-
-// Light glass slab — subtle fill and a crisp gradient rim.
-function platformDrawFrostedGlass(
-  bx,
-  by,
-  bw,
-  bh,
-  cornerR,
-  accentColor,
-  hover = false,
-  alpha = 255,
-  rimShift = 0
-) {
-  let ctx = drawingContext;
-  let r = min(cornerR, bw / 2, bh / 2);
-  let a = alpha / 255;
-  let [tr, tg, tb] = PLATFORM_TEXT_RGB;
-  let accent = color(accentColor || PLATFORM_TEXT_COLOR);
-  let sr = max(0, floor(lerp(tr, red(accent), 0.48)) - 14);
-  let sg = max(0, floor(lerp(tg, green(accent), 0.48)) - 14);
-  let sb = max(0, floor(lerp(tb, blue(accent), 0.48)) - 14);
-  let rimA = hover ? 0.82 : 0.7;
-  let shift = ms(14);
-  let tilt = bw * 0.22;
-  let rim =
-    rimShift < 0
-      ? ctx.createLinearGradient(bx - shift, by + bh, bx + tilt, by)
-      : rimShift > 0
-        ? ctx.createLinearGradient(bx + bw + shift, by + bh, bx + bw - tilt, by)
-        : ctx.createLinearGradient(bx, by, bx, by + bh);
-
-  ctx.save();
-  platformRoundRectPath(ctx, bx, by, bw, bh, r);
-  ctx.fillStyle = `rgba(255, 255, 255, ${(hover ? 0.55 : 0.42) * a})`;
-  ctx.fill();
-  ctx.restore();
-
-  ctx.save();
-  let inset = 0.5;
-  platformRoundRectPath(
-    ctx,
-    bx + inset,
-    by + inset,
-    bw - inset * 2,
-    bh - inset * 2,
-    max(1, r - inset)
-  );
-  rim.addColorStop(0, `rgba(${sr}, ${sg}, ${sb}, ${rimA * a})`);
-  rim.addColorStop(0.55, `rgba(${tr}, ${tg}, ${tb}, ${rimA * 0.82 * a})`);
-  rim.addColorStop(1, `rgba(${tr}, ${tg}, ${tb}, ${rimA * 0.34 * a})`);
-  ctx.strokeStyle = rim;
-  ctx.lineWidth = ms(1);
-  ctx.lineJoin = "round";
-  ctx.stroke();
-  ctx.restore();
-}
-
 function platformDrawFinalActionIcon(
   box,
   img,
@@ -3261,6 +2995,9 @@ function platformTryBakeSharePreviewStill(p) {
   platformBakeSharePreviewStill(p);
 }
 
+// --- Share sheet & animal menu ---
+// Overlay open/close, drag-to-dismiss, social share actions.
+
 function platformOpenShare() {
   platformWithSuppressedUiClose(() => {
     platformCloseAnimalMenu();
@@ -3333,10 +3070,6 @@ function platformGetAnimalMenuPopoverMotion() {
     offsetY: lerp(ms(12), 0, e),
     scale: lerp(0.94, 1, e)
   };
-}
-
-function platformGetAnimalMenuOverlayAlpha() {
-  return platformGetAnimalMenuPopoverMotion().alpha * 255;
 }
 
 function platformGetIntroAnimal(id) {
@@ -3897,10 +3630,6 @@ function platformHandleSharePointerUp(x, y) {
   }
 }
 
-function platformGetShareOverlayAlpha() {
-  return platformGetShareSheetMotion().alpha * 255;
-}
-
 function platformShareBoxWithMotion(box, offsetY) {
   return {
     x: box.x,
@@ -4153,13 +3882,6 @@ function platformThickenLineArtImage(img, radius = 1) {
   return img;
 }
 
-function platformProcessShareIcon(img) {
-  return platformThickenLineArtImage(
-    platformRecolorLineArtImage(img),
-    POSTER_LAYOUT.shareIconThicken
-  );
-}
-
 function platformProcessLineArtImages() {
   platformFinalHomeIcon = platformRecolorLineArtImage(
     platformFinalHomeIcon,
@@ -4368,28 +4090,6 @@ function platformDrawShareSheetGrabBar(sheet, alpha, gfx = null) {
   rectMode(CENTER);
   rect(cx, cy, grabW, grabH, grabH / 2);
   rectMode(CORNER);
-}
-
-function platformDrawShareCardBackground(card) {
-  let ctx = drawingContext;
-  let r = ms(18);
-
-  ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.18)";
-  ctx.shadowBlur = ms(22);
-  ctx.shadowOffsetY = ms(10);
-  ctx.shadowOffsetX = 0;
-  ctx.fillStyle = "rgba(255,255,255,1)";
-  platformRoundRectPath(ctx, card.x, card.y, card.w, card.h, r);
-  ctx.fill();
-  ctx.restore();
-
-  noFill();
-  stroke(220, 210, 196);
-  strokeWeight(1);
-  rectMode(CORNER);
-  rect(card.x, card.y, card.w, card.h, r);
-  noStroke();
 }
 
 function platformDrawAnimalPreviewInRect(p, rectBox, gfx = null) {
@@ -4699,66 +4399,6 @@ function platformGetAnimatedTrianglePoints(index) {
   ];
 }
 
-function platformAddSoftPoolGradient(ctx, cx, cy, maxR, rgb, peakAlpha) {
-  let [r, g, b] = rgb;
-  let rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
-  rg.addColorStop(0,    `rgba(${r},${g},${b},${peakAlpha})`);
-  rg.addColorStop(0.18, `rgba(${r},${g},${b},${peakAlpha * 0.72})`);
-  rg.addColorStop(0.40, `rgba(${r},${g},${b},${peakAlpha * 0.42})`);
-  rg.addColorStop(0.62, `rgba(${r},${g},${b},${peakAlpha * 0.20})`);
-  rg.addColorStop(0.82, `rgba(${r},${g},${b},${peakAlpha * 0.06})`);
-  rg.addColorStop(1,    `rgba(${r},${g},${b},0)`);
-  return rg;
-}
-
-function platformDrawSoftPool(ctx, pl) {
-  let maxR = max(pl.rx, pl.ry);
-  ctx.save();
-  ctx.translate(pl.x, pl.y);
-  ctx.scale(pl.rx / maxR, pl.ry / maxR);
-  ctx.beginPath();
-  ctx.arc(0, 0, maxR, 0, Math.PI * 2);
-  ctx.fillStyle = platformAddSoftPoolGradient(ctx, 0, 0, maxR, pl.rgb, pl.alpha);
-  ctx.fill();
-  ctx.restore();
-}
-
-function platformInitMeshGrain() {
-  if (platformMeshGrainGfx) {
-    return;
-  }
-
-  platformMeshGrainGfx = createGraphics(platformW, platformH);
-  platformMeshGrainGfx.loadPixels();
-  let d = platformMeshGrainGfx.pixels;
-
-  for (let i = 0; i < d.length; i += 4) {
-    let v = floor(random(60, 200));
-    d[i] = d[i + 1] = d[i + 2] = v;
-    d[i + 3] = random() < 0.72 ? floor(random(16, 52)) : 0;
-  }
-
-  platformMeshGrainGfx.updatePixels();
-}
-
-function platformDrawMeshGrain(ctx) {
-  if (!platformMeshGrainGfx) {
-    platformInitMeshGrain();
-  }
-
-  ctx.save();
-  ctx.globalCompositeOperation = "overlay";
-  ctx.globalAlpha = 0.32;
-  ctx.drawImage(platformMeshGrainGfx.canvas, 0, 0);
-  ctx.restore();
-
-  ctx.save();
-  ctx.globalCompositeOperation = "soft-light";
-  ctx.globalAlpha = 0.1;
-  ctx.drawImage(platformMeshGrainGfx.canvas, 0, 0);
-  ctx.restore();
-}
-
 function platformAddMeshGradient(ctx, cx, cy, maxR, rgb, peakAlpha, kind) {
   let [r, g, b] = rgb;
   let rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxR);
@@ -4780,90 +4420,14 @@ function platformAddMeshGradient(ctx, cx, cy, maxR, rgb, peakAlpha, kind) {
   return rg;
 }
 
-function platformDrawMeshShape(ctx, shape) {
-  let maxR = max(shape.rx, shape.ry);
-
-  ctx.save();
-  ctx.translate(shape.x, shape.y);
-  ctx.rotate(shape.rot);
-  ctx.scale(shape.rx / maxR, shape.ry / maxR);
-  ctx.beginPath();
-  ctx.arc(0, 0, maxR, 0, Math.PI * 2);
-  ctx.fillStyle = platformAddMeshGradient(
-    ctx,
-    0,
-    0,
-    maxR,
-    shape.rgb,
-    shape.alpha,
-    shape.kind || "deep"
-  );
-  ctx.fill();
-  ctx.restore();
-}
-
-function platformGetMeshShapeMotion(shape, t) {
-  let phase = shape.phase || 0;
-  let s = sin(t * shape.speed + phase);
-  let c = cos(t * shape.speed * 0.76 + phase * 1.05);
-  let x =
-    platformW * shape.baseX +
-    s * platformW * shape.travelX +
-    c * platformW * (shape.travelX * 0.35);
-  let y =
-    platformH * shape.baseY +
-    c * platformH * shape.travelY +
-    s * platformH * (shape.travelY * 0.28);
-
-  if (shape.driftX != null && shape.driftY != null) {
-    x += s * platformW * shape.driftX;
-    y += s * platformH * shape.driftY;
-  }
-
-  let rot =
-    shape.baseRot + sin(t * shape.rotSpeed + phase) * shape.rotAmp;
-
-  return {
-    x,
-    y,
-    rot,
-    rx: platformW * shape.rx,
-    ry: platformH * shape.ry,
-    rgb: shape.rgb,
-    alpha: shape.alpha,
-    kind: shape.kind
-  };
-}
-
-function platformDrawMeshTextSafeZones(ctx) {
-  let zones = [
-    { cx: 0.5, cy: 0.12, r: 0.32, peak: 0.34 },
-    { cx: 0.5, cy: 0.36, r: 0.26, peak: 0.22 },
-    { cx: 0.5, cy: 0.8, r: 0.22, peak: 0.16 }
-  ];
-
-  for (let z of zones) {
-    let g = ctx.createRadialGradient(
-      platformW * z.cx,
-      platformH * z.cy,
-      0,
-      platformW * z.cx,
-      platformH * z.cy,
-      platformH * z.r
-    );
-    g.addColorStop(0, `rgba(255, 255, 255, ${z.peak})`);
-    g.addColorStop(0.55, `rgba(255, 255, 255, ${z.peak * 0.38})`);
-    g.addColorStop(1, "rgba(255, 255, 255, 0)");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, platformW, platformH);
-  }
-}
-
 function platformDrawMainBackground() {
   noStroke();
   rectMode(CORNER);
   background("#FFFFFF");
 }
+
+// --- Intro, loading morph & viewport ---
+// Triangle menu, zoom into animal, loading morph, canvas layout.
 
 function platformDrawIntro() {
   // Zoom-only path: skip title/other triangles so the fill stays smooth.
@@ -5337,36 +4901,6 @@ function platformDrawPosterFadeOverlay() {
   fill(red(fadeC), green(fadeC), blue(fadeC), a);
   rect(0, 0, width, height);
 }
-function platformDrawBlockTitle(lines, x, y, size, leading, fontObj, fillValue) {
-  if (fontObj) {
-    textFont(fontObj);
-  }
-
-  textSize(size);
-  textAlign(LEFT, TOP);
-  textStyle(NORMAL);
-
-  let maxW = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    maxW = max(maxW, textWidth(lines[i]));
-  }
-
-  noStroke();
-  fill(fillValue);
-
-  for (let i = 0; i < lines.length; i++) {
-    let lineW = textWidth(lines[i]);
-    let sx = lineW === 0 ? 1 : maxW / lineW;
-
-    push();
-    translate(x, y + i * leading);
-    scale(sx, 1);
-    text(lines[i], 0, 0);
-    pop();
-  }
-}
-
 function platformTriggerCorrectFeedback(animalId) {
   let p = posterRegistry[animalId];
   if (!p) return;
@@ -5392,20 +4926,6 @@ function platformVibrateWrongAnswer() {
   if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
     navigator.vibrate([35, 25, 35, 25, 35, 25, 35]);
   }
-}
-
-function platformTriggerWrongFeedback(animalId, side) {
-  let p = posterRegistry[animalId];
-  if (!p) return;
-  platformVibrateWrongAnswer();
-  p.pulse.positive = 0;
-  p.pulse.wrongSide = side;
-  p.pulse.wrongShake = 16;
-  p.pulse.pieceShake = 42;
-  p.pulse.pieceShakeKind = "bad";
-  p.feedback.text = "";
-  p.feedback.good = false;
-  p.feedback.timer = 0;
 }
 
 function platformUpdateFeedbackTimers(animalId) {
@@ -5494,10 +5014,6 @@ function platformGetLayoutYTighten() {
   // Scale Y from the top — keeps header up and footer down without
   // collapsing everything toward the vertical center.
   return vp.h / scaledCanvasH;
-}
-
-function platformTuckRefY(refY) {
-  return platformLayoutY(refY);
 }
 
 function platformUpdateViewportFit() {
@@ -5669,7 +5185,8 @@ function platformFitCanvasToScreen() {
 
 
 // =====================================================
-// SHARED POSTER UTILITIES
+// SHARED LOOSE-PIECE PHYSICS
+// Scatter, assemble, repel, and wrong-answer fall for all animals.
 // =====================================================
 
 const platformChoiceStages = [
@@ -5703,7 +5220,6 @@ const platformLooseTargetCache = {};
 const platformLooseGroupBBoxCache = {};
 const platformPelobatesTargetCache = {};
 let platformLooseRepelFrameCache = null;
-const platformChoiceImageVisualOffsetCache = new WeakMap();
 const platformLooseLayoutVersion = 96;
 const PLATFORM_LOOSE_ROT_PAD = 24;
 const PLATFORM_LOOSE_STROKE_PAD = 3;
@@ -6141,10 +5657,6 @@ function platformLooseShiftTargetScreen(target, dxScreen, dyScreen, cfg) {
     x: shiftedMesh.x - pivot.x,
     y: shiftedMesh.y - pivot.y
   };
-}
-
-function platformLooseShiftTargetScreenY(target, dyScreen, cfg) {
-  return platformLooseShiftTargetScreen(target, 0, dyScreen, cfg);
 }
 
 function platformLooseGetPieceRot(cfg, index) {
@@ -6631,85 +6143,6 @@ function platformLooseOverlapsConnectedGroups(p, offsetX, offsetY, index, rot, p
   return false;
 }
 
-function platformLooseRefreshRepelCache(p) {
-  let cfg = p.cfg;
-
-  if (!cfg.getPieceGroup) {
-    return;
-  }
-
-  if (p.looseRepelCacheGen === p.clickCount && p.looseRepelCache) {
-    return;
-  }
-
-  let profile = platformLooseGetProfile(cfg);
-  let pivot = profile.pivot;
-  let saved = p.tGroup.slice();
-  p.tGroup = platformLooseScenarioTGroupFromClick(p);
-  p.looseRepelCache = [];
-
-  for (let i = 0; i < cfg.totalPieces; i++) {
-    let group = cfg.getPieceGroup(i);
-
-    if (platformLooseAssemblerRepelWeight(p.tGroup[group]) > 0) {
-      p.looseRepelCache[i] = { x: 0, y: 0 };
-      continue;
-    }
-
-    let off = p.pieceOffsets[i];
-    let rot = off?.rot || 0;
-    let target = platformLooseGetScatterTargetForPiece(p, i);
-    target = platformLooseFitTargetOffset(cfg, pivot, target.x, target.y, i, rot);
-    let cleared = platformLooseComputeRepelCleared(
-      p,
-      group,
-      target.x,
-      target.y,
-      rot,
-      i,
-      0
-    );
-    cleared = platformLooseFitTargetOffset(
-      cfg,
-      pivot,
-      cleared.x,
-      cleared.y,
-      i,
-      rot
-    );
-    let afterClear = platformLooseClearLooseFromConnectedBBox(
-      cleared.x,
-      cleared.y,
-      p,
-      group,
-      i,
-      rot
-    );
-
-    if (
-      platformLooseOverlapsConnectedGroups(p, cleared.x, cleared.y, i, rot, group) &&
-      !platformLooseOverlapsConnectedGroups(
-        p,
-        afterClear.x,
-        afterClear.y,
-        i,
-        rot,
-        group
-      )
-    ) {
-      cleared = afterClear;
-    }
-
-    p.looseRepelCache[i] = {
-      x: cleared.x - target.x,
-      y: cleared.y - target.y
-    };
-  }
-
-  p.tGroup = saved;
-  p.looseRepelCacheGen = p.clickCount;
-}
-
 function platformLooseTickRepelBlend(p) {
   if (p.looseRepelBlendT > 0) {
     let step = p.disassembleBoost > 0 ? 0.01 : 0.38;
@@ -7097,71 +6530,6 @@ function toadSeparateLooseTargets(targets, cfg, gap = ms(24), maxIter = 36) {
     if (!moved) {
       break;
     }
-  }
-}
-
-function toadKeepLooseTargetsClearOfConnected(targets, cfg) {
-  let p = posterRegistry.toad;
-
-  if (!p) {
-    return;
-  }
-
-  let profile = platformLooseGetProfile(cfg);
-  let pivot = profile.pivot;
-  let gap = ms(32);
-
-  for (let i = 0; i < targets.length; i++) {
-    let pieceGroup = cfg.getPieceGroup(i);
-
-    if (platformLooseAssemblerRepelWeight(p.tGroup[pieceGroup]) > 0) {
-      continue;
-    }
-
-    let rot = p.pieceOffsets[i]?.rot || 0;
-    let ox = targets[i].x;
-    let oy = targets[i].y;
-
-    for (let step = 0; step < 14; step++) {
-      let moved = false;
-
-      for (let g = 0; g < 4; g++) {
-        if (g === pieceGroup || platformLooseAssemblerRepelWeight(p.tGroup[g]) <= 0) {
-          continue;
-        }
-
-        let connectedBox = platformLooseGetConnectedGroupUnionBBox(p, g);
-
-        if (!connectedBox) {
-          continue;
-        }
-
-        let looseBox = platformLoosePieceScreenBBox(cfg, ox, oy, i, rot, true);
-        let sep = platformLooseSeparateBBox(looseBox, connectedBox, gap);
-
-        if (sep.dx === 0 && sep.dy === 0) {
-          continue;
-        }
-
-        let shifted = platformLooseApplyScreenSepToMesh(
-          cfg,
-          pivot,
-          ox,
-          oy,
-          sep.dx,
-          sep.dy
-        );
-        ox = shifted.x;
-        oy = shifted.y;
-        moved = true;
-      }
-
-      if (!moved) {
-        break;
-      }
-    }
-
-    targets[i] = { x: ox, y: oy };
   }
 }
 
@@ -8153,24 +7521,6 @@ function platformLooseBakeScatterTargets(cfg, targets) {
   return baked;
 }
 
-function platformLooseGetToadScatterTargets() {
-  let cacheKey = "toad_v" + platformLooseLayoutVersion;
-
-  if (!platformPelobatesTargetCache[cacheKey]) {
-    let cfg = posterRegistry.toad.cfg;
-    let built = [];
-
-    for (let i = 0; i < cfg.totalPieces; i++) {
-      built.push(getPelobatesLoosePieceTarget(i));
-    }
-
-    toadAdjustLooseTargets(built, cfg);
-    platformPelobatesTargetCache[cacheKey] = built;
-  }
-
-  return platformPelobatesTargetCache[cacheKey];
-}
-
 function platformLooseGetScatterTargetForPiece(p, index) {
   let cfg = p.cfg;
   let profile = platformLooseGetProfile(cfg);
@@ -8873,51 +8223,6 @@ function platformLooseClampOffset(offsetX, offsetY, rot, strength = 1, cfg = {},
   };
 }
 
-function platformLooseClampAbsPosition(absX, absY, strength = 1, cfg = {}, index = 0, rot = 0) {
-  let pivot = platformLooseGetPivot(cfg);
-  let clamped = platformLooseClampOffset(
-    absX - pivot.x,
-    absY - pivot.y,
-    rot,
-    strength,
-    cfg,
-    index
-  );
-
-  return {
-    x: pivot.x + clamped.x,
-    y: pivot.y + clamped.y
-  };
-}
-
-function platformKeepLoosePiecesClear(
-  p,
-  pieceGroup,
-  offsetX,
-  offsetY,
-  pieceT,
-  index = 0,
-  rot = 0
-) {
-  let pushed = platformLooseApplyPushDelta(
-    p,
-    index,
-    offsetX,
-    offsetY,
-    pieceT,
-    pieceGroup
-  );
-
-  return platformLooseClampOffset(
-    pushed.x,
-    pushed.y,
-    rot,
-    1,
-    p.cfg,
-    index
-  );
-}
-
 function platformGetLooseWobbleDampen(p, pieceGroup, absX, absY, pieceT, index = 0) {
   let repelMix = platformLooseRepelMix(pieceT, p);
 
@@ -9234,26 +8539,6 @@ function platformDrawQuad(hexColor, p1, p2, p3, p4, weight = 1.1) {
   quad(p1[0], p1[1], p2[0], p2[1], p3[0], p3[1], p4[0], p4[1]);
 }
 
-function platformDrawVerticalGradient(bgTop, bgBottom) {
-  noStroke();
-  rectMode(CORNER);
-
-  for (let y = 0; y < platformH; y++) {
-    let t = map(y, 0, platformH, 0, 1);
-    let c = lerpColor(color(bgTop), color(bgBottom), t);
-    fill(c);
-    rect(0, y, platformW, 1);
-  }
-}
-
-function platformDrawRadialGlow(r, g, b, centerX, centerY, maxRadius, step, maxAlpha, widthScale, heightScale) {
-  for (let radius = maxRadius; radius > 0; radius -= step) {
-    let a = map(radius, maxRadius, 0, 0, maxAlpha);
-    fill(r, g, b, a);
-    ellipse(centerX, centerY, radius * widthScale, radius * heightScale);
-  }
-}
-
 function platformCreateChoiceBoxes(choiceW, choiceH, choiceY, centerPull = 0) {
   let margin = POSTER_LAYOUT.marginX;
   let leftCellX = margin;
@@ -9351,51 +8636,17 @@ function platformMeasureChoiceLabelBlock(label, font, size, leading) {
   return (lines.length - 1) * leading + textAscent() + textDescent();
 }
 
-function platformGetChoiceImageVisualOffset(img) {
-  if (!img || !img.canvas) {
-    return { x: 0, y: 0 };
+function platformGetChoiceImageDrawSize(img, maxSize) {
+  if (!img || !img.width || !img.height) {
+    return { w: maxSize, h: maxSize, scale: 1 };
   }
 
-  if (platformChoiceImageVisualOffsetCache.has(img)) {
-    return platformChoiceImageVisualOffsetCache.get(img);
-  }
-
-  let c = img.canvas;
-  let ctx = c.getContext("2d");
-  let d = ctx.getImageData(0, 0, c.width, c.height).data;
-  let sx = 0;
-  let sy = 0;
-  let m = 0;
-
-  for (let y = 0; y < c.height; y++) {
-    for (let x = 0; x < c.width; x++) {
-      let i = (y * c.width + x) * 4;
-      let r = d[i];
-      let g = d[i + 1];
-      let b = d[i + 2];
-      let a = d[i + 3];
-      if (a < 40) {
-        continue;
-      }
-
-      let lum = 0.299 * r + 0.587 * g + 0.114 * b;
-      let weight = (a / 255) * pow(lum / 255, 1.35);
-      if (weight < 0.02) {
-        continue;
-      }
-
-      sx += x * weight;
-      sy += y * weight;
-      m += weight;
-    }
-  }
-
-  let offset =
-    m > 0
-      ? { x: sx / m - c.width / 2, y: sy / m - c.height / 2 }
-      : { x: 0, y: 0 };
-  platformChoiceImageVisualOffsetCache.set(img, offset);
-  return offset;
+  let scale = min(maxSize / img.width, maxSize / img.height);
+  return {
+    w: img.width * scale,
+    h: img.height * scale,
+    scale
+  };
 }
 
 const platformChoiceImageTweaks = {
@@ -9410,19 +8661,6 @@ const platformChoiceImageTweaks = {
   plasticFork: { maxSizeScale: 0.98 },
   reusableFork: { maxSizeScale: 0.98 }
 };
-
-function platformGetChoiceImageDrawSize(img, maxSize) {
-  if (!img || !img.width || !img.height) {
-    return { w: maxSize, h: maxSize, scale: 1 };
-  }
-
-  let scale = min(maxSize / img.width, maxSize / img.height);
-  return {
-    w: img.width * scale,
-    h: img.height * scale,
-    scale
-  };
-}
 
 function platformGetChoicePanelLayout(w, label, img, font, imgId = "") {
   let btnSize = POSTER_LAYOUT.choiceBtnSize;
@@ -9535,36 +8773,6 @@ function platformDrawChoicePanel(config) {
   pop();
 }
 
-function platformDrawStageChoices(clickCount, leftBox, rightBox, images, drawPanel, stages = platformChoiceStages) {
-  if (clickCount >= stages.length) {
-    return;
-  }
-
-  let stage = stages[clickCount];
-
-  drawPanel(
-    leftBox.x,
-    leftBox.y,
-    leftBox.w,
-    leftBox.h,
-    images[stage.left.img],
-    stage.left.label,
-    stage.left.img,
-    stage.left
-  );
-
-  drawPanel(
-    rightBox.x,
-    rightBox.y,
-    rightBox.w,
-    rightBox.h,
-    images[stage.right.img],
-    stage.right.label,
-    stage.right.img,
-    stage.right
-  );
-}
-
 function platformDrawQuestionTitle(textColor) {
   fill(textColor);
   textSize(platformText.questionTitle.size);
@@ -9626,18 +8834,6 @@ function platformDrawWrongTryAgain(p, textColor) {
 function platformGetQuestionStageCount(p) {
   let stages = p.cfg.choiceStages || platformChoiceStages;
   return stages.length;
-}
-
-function platformGetProgressBaseY() {
-  return (
-    platformText.questionTitle.y +
-    platformText.questionTitle.leading +
-    POSTER_LAYOUT.progressGapBelowQuestion
-  );
-}
-
-function platformEaseOutCubic(t) {
-  return 1 - Math.pow(1 - constrain(t, 0, 1), 3);
 }
 
 function platformStartProgressFill(p, index) {
@@ -9937,7 +9133,8 @@ function platformDrawTightWordText(str, x, y, leading, align = "center", wordGap
 
 
 // =====================================================
-// POSTER REGISTRY + GENERIC POSTER ENGINE
+// POSTER LAYOUT, REGISTRY & SHARED RUNTIME
+// Spacing tokens, per-animal configs, quiz draw/press pipeline.
 // =====================================================
 
 const POSTER_LAYOUT = {
@@ -10974,10 +10171,6 @@ function posterGetChoicePanelY(p) {
   );
 }
 
-function platformGetActiveQuestionPlayNudgeY() {
-  return platformActivePosterQuestionNudgeY;
-}
-
 function platformGetChoiceLayoutNudgeY() {
   return platformActivePosterQuestionNudgeY + POSTER_LAYOUT.choicePanelNudgeY;
 }
@@ -11432,51 +10625,27 @@ function posterWindowResized(id) {
   }
 }
 
-const platformAnimalHandlers = {
-  turtle: {
+function platformMakeAnimalHandlers(id) {
+  return {
     finalClickCount: 3,
-    draw: () => posterDraw("turtle"),
-    setup: () => posterSetup("turtle"),
-    mousePressed: () => posterMousePressed("turtle"),
-    touchStarted: () => posterTouchStarted("turtle"),
-    windowResized: () => posterWindowResized("turtle")
-  },
-  eagle: {
-    finalClickCount: 3,
-    draw: () => posterDraw("eagle"),
-    setup: () => posterSetup("eagle"),
-    mousePressed: () => posterMousePressed("eagle"),
-    touchStarted: () => posterTouchStarted("eagle"),
-    windowResized: () => posterWindowResized("eagle")
-  },
-  deer: {
-    finalClickCount: 3,
-    draw: () => posterDraw("deer"),
-    setup: () => posterSetup("deer"),
-    mousePressed: () => posterMousePressed("deer"),
-    touchStarted: () => posterTouchStarted("deer"),
-    windowResized: () => posterWindowResized("deer")
-  },
-  toad: {
-    finalClickCount: 3,
-    draw: () => posterDraw("toad"),
-    setup: () => posterSetup("toad"),
-    mousePressed: () => posterMousePressed("toad"),
-    touchStarted: () => posterTouchStarted("toad"),
-    windowResized: () => posterWindowResized("toad")
-  },
-  hyena: {
-    finalClickCount: 3,
-    draw: () => posterDraw("hyena"),
-    setup: () => posterSetup("hyena"),
-    mousePressed: () => posterMousePressed("hyena"),
-    touchStarted: () => posterTouchStarted("hyena"),
-    windowResized: () => posterWindowResized("hyena")
-  }
-};
+    draw: () => posterDraw(id),
+    setup: () => posterSetup(id),
+    mousePressed: () => posterMousePressed(id),
+    touchStarted: () => posterTouchStarted(id),
+    windowResized: () => posterWindowResized(id)
+  };
+}
+
+const platformAnimalHandlers = Object.fromEntries(
+  ["turtle", "eagle", "deer", "toad", "hyena"].map((id) => [
+    id,
+    platformMakeAnimalHandlers(id)
+  ])
+);
 
 // =====================================================
 // ANIMAL ART — unique geometry / motion per species
+// Turtle, eagle, deer, toad, hyena draw + piece transforms.
 // =====================================================
 
 function drawTurtleAnimal() {
