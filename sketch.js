@@ -1559,38 +1559,19 @@ function platformAudioSyncMuteButton() {
 }
 
 function platformEnsureMuteButton() {
-  if (platformAudioMuteEl || typeof document === "undefined") {
-    return platformAudioMuteEl;
+  // Mute control removed from the UI.
+  return null;
+}
+
+function platformRemoveMuteButton() {
+  if (typeof document === "undefined") {
+    return;
   }
-  let el = document.createElement("button");
-  el.id = "platform-audio-mute";
-  el.type = "button";
-  el.style.cssText =
-    "position:fixed;top:max(10px, env(safe-area-inset-top, 0px));" +
-    "right:max(10px, env(safe-area-inset-right, 0px));" +
-    "width:40px;height:40px;border:0;border-radius:999px;padding:0;" +
-    "display:flex;align-items:center;justify-content:center;cursor:pointer;" +
-    "background:rgba(255,255,255,0.55);backdrop-filter:blur(12px);" +
-    "-webkit-backdrop-filter:blur(12px);" +
-    "box-shadow:0 1px 0 rgba(255,255,255,0.7) inset, 0 6px 18px rgba(78,70,61,0.12);" +
-    "z-index:30;-webkit-tap-highlight-color:transparent;touch-action:manipulation;";
-  el.addEventListener("click", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    platformAudioToggleMute();
-  });
-  el.addEventListener(
-    "touchstart",
-    (e) => {
-      e.stopPropagation();
-      platformAudioUnlock();
-    },
-    { passive: true }
-  );
-  document.body.appendChild(el);
-  platformAudioMuteEl = el;
-  platformAudioSyncMuteButton();
-  return el;
+  let el = platformAudioMuteEl || document.getElementById("platform-audio-mute");
+  if (el && el.parentNode) {
+    el.parentNode.removeChild(el);
+  }
+  platformAudioMuteEl = null;
 }
 
 function platformAudioVoiceAt(freq, start, dur, gain, opts = {}) {
@@ -1934,11 +1915,11 @@ function setup() {
   }
 
   platformCanvasReady = true;
-  platformAudioLoadMutePreference();
+  platformAudioMuted = false;
   platformAudioApplyPlaybackSession();
   platformEnsureSilentMediaUnlock();
   platformPreloadAllHtmlSamples();
-  platformEnsureMuteButton();
+  platformRemoveMuteButton();
   platformBindAudioGestureUnlock();
   platformProcessLineArtImages();
   platformBindViewportListeners();
