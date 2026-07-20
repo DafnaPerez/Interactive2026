@@ -4700,7 +4700,8 @@ function platformEnsureSplashOverlay() {
   wrap.setAttribute("aria-hidden", "true");
   wrap.style.cssText =
     "position:fixed;inset:0;z-index:40;display:flex;align-items:center;" +
-    "justify-content:center;background:#FFFFFF;pointer-events:none;opacity:1;";
+    "justify-content:center;background:#FFFFFF;background-color:#FFFFFF;" +
+    "color-scheme:only light;pointer-events:none;opacity:1;";
 
   let stage = document.createElement("div");
   stage.style.cssText =

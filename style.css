@@ -1,3 +1,7 @@
+:root {
+  color-scheme: only light;
+}
+
 html,
 body {
   margin: 0;
@@ -7,12 +11,15 @@ body {
   height: 100dvh;
   overflow: hidden;
   background: #ffffff;
+  background-color: #ffffff;
+  color-scheme: only light;
 }
 
 body {
   position: fixed;
   inset: 0;
   background: #ffffff;
+  background-color: #ffffff;
 }
 
 main {
@@ -22,6 +29,7 @@ main {
   height: 100dvh;
   overflow: hidden;
   background: #ffffff;
+  background-color: #ffffff;
 }
 
 canvas {
@@ -29,4 +37,12 @@ canvas {
   touch-action: manipulation;
   border: none;
   outline: none;
+  background: #ffffff;
+  background-color: #ffffff;
+}
+
+#platform-splash {
+  background: #ffffff !important;
+  background-color: #ffffff !important;
+  color-scheme: only light;
 }
