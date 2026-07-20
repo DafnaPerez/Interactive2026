@@ -15,7 +15,7 @@ let platformSplashStarted = false;
 let platformSplashPhase = "idle"; // idle | preWhite | play | hold | fadeOut | whiteBeat | fadeIn | done
 let platformSplashPhaseStart = 0;
 let platformSplashPreWhiteMs = 600;
-let platformSplashHoldMs = 620;
+let platformSplashHoldMs = 380;
 let platformSplashFadeOutMs = 380;
 let platformSplashWhiteBeatMs = 0;
 let platformSplashFadeInMs = 480;
@@ -145,7 +145,7 @@ let platformAudioActiveSources = [];
 let platformAudioGestureBound = false;
 let platformIgnoreNextMousePress = false;
 const PLATFORM_AUDIO_MASTER_GAIN = 0.42;
-const PLATFORM_SFX_SAMPLE_V = 23;
+const PLATFORM_SFX_SAMPLE_V = 24;
 const PLATFORM_SFX_SAMPLE_URLS = {
   wrong: `sfx/fail.mp3?v=${PLATFORM_SFX_SAMPLE_V}`,
   correct: `sfx/correct.wav?v=${PLATFORM_SFX_SAMPLE_V}`,
@@ -368,8 +368,12 @@ const PLATFORM_SHARE_BACKDROP_BLUR_PX = 18;
 
 let platformBlurScratchCanvas = null;
 let platformBlurDownCanvas = null;
+let platformBlurTinyCanvas = null;
+let platformBlurLiveResult = null;
 let platformBlurSnapCacheKey = "";
 let platformBlurSnapCache = null;
+let platformBlurFrameStamp = -1;
+let platformBlurFilterContentOk = null;
 let platformCanvasFilterWorks = null;
 
 function platformGetSnapCanvas(snap) {
@@ -474,23 +478,52 @@ function platformBoxBlurVertical(rgba, w, h, radius) {
 function platformManualBlurCanvasInto(sourceCanvas, destCanvas, blurPx) {
   let sw = sourceCanvas.width;
   let sh = sourceCanvas.height;
-  let scale = 0.38;
+  // Fallback when canvas filter blur is unavailable. Stepwise downscale keeps
+  // this softer than a single tiny upscale.
+  let scale = 0.42;
   let dw = Math.max(1, Math.round(sw * scale));
   let dh = Math.max(1, Math.round(sh * scale));
 
   if (!platformBlurDownCanvas) {
     platformBlurDownCanvas = document.createElement("canvas");
   }
-  platformBlurDownCanvas.width = dw;
-  platformBlurDownCanvas.height = dh;
+  if (
+    platformBlurDownCanvas.width !== dw ||
+    platformBlurDownCanvas.height !== dh
+  ) {
+    platformBlurDownCanvas.width = dw;
+    platformBlurDownCanvas.height = dh;
+  }
 
-  let dctx = platformBlurDownCanvas.getContext("2d");
+  let dctx = platformBlurDownCanvas.getContext("2d", {
+    willReadFrequently: true,
+  });
   dctx.clearRect(0, 0, dw, dh);
-  dctx.drawImage(sourceCanvas, 0, 0, dw, dh);
+  dctx.imageSmoothingEnabled = true;
+  dctx.imageSmoothingQuality = "high";
+
+  let mw = Math.max(dw, Math.round(sw * 0.65));
+  let mh = Math.max(dh, Math.round(sh * 0.65));
+  if (!platformBlurTinyCanvas) {
+    platformBlurTinyCanvas = document.createElement("canvas");
+  }
+  if (
+    platformBlurTinyCanvas.width !== mw ||
+    platformBlurTinyCanvas.height !== mh
+  ) {
+    platformBlurTinyCanvas.width = mw;
+    platformBlurTinyCanvas.height = mh;
+  }
+  let mctx = platformBlurTinyCanvas.getContext("2d");
+  mctx.clearRect(0, 0, mw, mh);
+  mctx.imageSmoothingEnabled = true;
+  mctx.imageSmoothingQuality = "high";
+  mctx.drawImage(sourceCanvas, 0, 0, mw, mh);
+  dctx.drawImage(platformBlurTinyCanvas, 0, 0, mw, mh, 0, 0, dw, dh);
 
   let imageData = dctx.getImageData(0, 0, dw, dh);
   let radius = Math.max(1, Math.round((blurPx * scale * sw) / platformW / 1.6));
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 2; i++) {
     platformBoxBlurHorizontal(imageData.data, dw, dh, radius);
     platformBoxBlurVertical(imageData.data, dw, dh, radius);
   }
@@ -503,11 +536,85 @@ function platformManualBlurCanvasInto(sourceCanvas, destCanvas, blurPx) {
   sctx.drawImage(platformBlurDownCanvas, 0, 0, dw, dh, 0, 0, sw, sh);
 }
 
-function platformPreferManualCanvasBlur() {
+// iPhone live overlay blur: downscale → Gaussian at small size → keep small.
+// Stretched when drawn. Updates every frame without freezing or full-res lag.
+function platformIosLiveBlurCanvas(sourceCanvas, blurPx) {
+  let sw = sourceCanvas.width | 0;
+  let sh = sourceCanvas.height | 0;
+  if (!sw || !sh) {
+    return null;
+  }
+  let scale = 0.34;
+  let dw = Math.max(1, Math.round(sw * scale));
+  let dh = Math.max(1, Math.round(sh * scale));
+
+  if (!platformBlurDownCanvas) {
+    platformBlurDownCanvas = document.createElement("canvas");
+  }
+  if (
+    platformBlurDownCanvas.width !== dw ||
+    platformBlurDownCanvas.height !== dh
+  ) {
+    platformBlurDownCanvas.width = dw;
+    platformBlurDownCanvas.height = dh;
+  }
+  if (!platformBlurLiveResult) {
+    platformBlurLiveResult = document.createElement("canvas");
+  }
+  if (
+    platformBlurLiveResult.width !== dw ||
+    platformBlurLiveResult.height !== dh
+  ) {
+    platformBlurLiveResult.width = dw;
+    platformBlurLiveResult.height = dh;
+  }
+
+  let dctx = platformBlurDownCanvas.getContext("2d");
+  dctx.imageSmoothingEnabled = true;
+  dctx.imageSmoothingQuality = "high";
+  dctx.clearRect(0, 0, dw, dh);
+  dctx.drawImage(sourceCanvas, 0, 0, dw, dh);
+
+  let rctx = platformBlurLiveResult.getContext("2d");
+  rctx.imageSmoothingEnabled = true;
+  rctx.imageSmoothingQuality = "high";
+  rctx.clearRect(0, 0, dw, dh);
+  // Radius scales with the buffer so softness matches full-res blur(~18px).
+  let smallBlur = Math.max(2, blurPx * scale * 1.2);
+  if (platformDetectCanvasFilterWorks()) {
+    rctx.filter = `blur(${smallBlur}px)`;
+    rctx.drawImage(platformBlurDownCanvas, 0, 0);
+    rctx.filter = "none";
+  } else {
+    // Soft fallback: extra mid downscale pass, still live each frame.
+    let tw = Math.max(1, Math.round(dw * 0.7));
+    let th = Math.max(1, Math.round(dh * 0.7));
+    if (!platformBlurTinyCanvas) {
+      platformBlurTinyCanvas = document.createElement("canvas");
+    }
+    if (
+      platformBlurTinyCanvas.width !== tw ||
+      platformBlurTinyCanvas.height !== th
+    ) {
+      platformBlurTinyCanvas.width = tw;
+      platformBlurTinyCanvas.height = th;
+    }
+    let tctx = platformBlurTinyCanvas.getContext("2d");
+    tctx.clearRect(0, 0, tw, th);
+    tctx.drawImage(platformBlurDownCanvas, 0, 0, dw, dh, 0, 0, tw, th);
+    rctx.drawImage(platformBlurTinyCanvas, 0, 0, tw, th, 0, 0, dw, dh);
+  }
+  return platformBlurLiveResult;
+}
+
+function platformIsIosDevice() {
   if (typeof navigator === "undefined") {
     return false;
   }
-  return /iP(hone|od|ad)/.test(navigator.userAgent);
+  return (
+    /iP(hone|od|ad)/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
 }
 
 function platformIsSafari() {
@@ -544,7 +651,9 @@ let platformMenuBackdropEl = null;
 let platformMenuOverlayGfx = null;
 
 function platformUseLiveDomMenuBackdrop() {
-  return platformPreferManualCanvasBlur();
+  // iOS Safari/Chrome: backdrop-filter often fails to sample the p5 canvas
+  // and composites as solid white. Use canvas manual blur (same as Android).
+  return false;
 }
 
 function platformUseLiveDomBackdrop() {
@@ -677,6 +786,11 @@ function platformBlurCanvasSource(sourceCanvas, blurPx) {
     return null;
   }
 
+  // iPhone: live small-buffer Gaussian each frame (smooth + cheap).
+  if (platformIsIosDevice()) {
+    return platformIosLiveBlurCanvas(sourceCanvas, blurPx);
+  }
+
   let sw = sourceCanvas.width;
   let sh = sourceCanvas.height;
   if (!platformBlurScratchCanvas) {
@@ -693,27 +807,37 @@ function platformBlurCanvasSource(sourceCanvas, blurPx) {
   let sctx = platformBlurScratchCanvas.getContext("2d");
   sctx.clearRect(0, 0, sw, sh);
 
-  if (platformPreferManualCanvasBlur()) {
-    platformManualBlurCanvasInto(sourceCanvas, platformBlurScratchCanvas, blurPx);
-  } else if (platformDetectCanvasFilterWorks()) {
+  if (platformDetectCanvasFilterWorks()) {
     sctx.filter = `blur(${blurPx}px)`;
     sctx.drawImage(sourceCanvas, 0, 0, sw, sh);
     sctx.filter = "none";
-    if (
-      !platformCanvasBlurActuallyWorked(
+    // Verify once — getImageData every frame would tank performance.
+    if (platformBlurFilterContentOk === null) {
+      platformBlurFilterContentOk = platformCanvasBlurActuallyWorked(
         sourceCanvas,
         platformBlurScratchCanvas,
         sw,
         sh
-      )
-    ) {
-      platformManualBlurCanvasInto(sourceCanvas, platformBlurScratchCanvas, blurPx);
+      );
     }
-  } else {
-    platformManualBlurCanvasInto(sourceCanvas, platformBlurScratchCanvas, blurPx);
+    if (platformBlurFilterContentOk) {
+      return platformBlurScratchCanvas;
+    }
+    sctx.clearRect(0, 0, sw, sh);
   }
 
+  platformManualBlurCanvasInto(sourceCanvas, platformBlurScratchCanvas, blurPx);
   return platformBlurScratchCanvas;
+}
+
+function platformInvalidateBlurSnapCache() {
+  platformBlurSnapCache = null;
+  platformBlurSnapCacheKey = "";
+  platformBlurFrameStamp = -1;
+}
+
+function platformOverlayWantsLiveBlur() {
+  return platformAnimalMenuOpen || platformShareOpen;
 }
 
 function platformGetBlurredSnap(snap, blurPx) {
@@ -723,12 +847,25 @@ function platformGetBlurredSnap(snap, blurPx) {
   }
 
   let cacheKey =
-    sourceCanvas.width +
-    "x" +
-    sourceCanvas.height +
-    "@" +
-    blurPx +
-    (platformAnimalMenuOpen || platformShareOpen ? "#f" + frameCount : "");
+    sourceCanvas.width + "x" + sourceCanvas.height + "@" + blurPx;
+
+  // While menu/share is open, refresh blur every frame so the poster keeps
+  // moving inside the blur — but reuse within the same frame (backdrop + frost).
+  if (platformOverlayWantsLiveBlur()) {
+    let stamp = typeof frameCount === "number" ? frameCount : millis();
+    if (
+      platformBlurFrameStamp === stamp &&
+      platformBlurSnapCacheKey === cacheKey &&
+      platformBlurSnapCache
+    ) {
+      return platformBlurSnapCache;
+    }
+    platformBlurSnapCache = platformBlurCanvasSource(sourceCanvas, blurPx);
+    platformBlurSnapCacheKey = cacheKey;
+    platformBlurFrameStamp = stamp;
+    return platformBlurSnapCache;
+  }
+
   if (platformBlurSnapCacheKey === cacheKey && platformBlurSnapCache) {
     return platformBlurSnapCache;
   }
@@ -739,17 +876,18 @@ function platformGetBlurredSnap(snap, blurPx) {
 }
 
 function platformDrawBlurredSnapIntoRect(ctx, snap, blurred, x, y, w, h) {
-  let sourceCanvas = platformGetSnapCanvas(snap);
-  if (!sourceCanvas || !blurred) {
+  if (!blurred) {
     return false;
   }
 
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(
     blurred,
     0,
     0,
-    sourceCanvas.width,
-    sourceCanvas.height,
+    blurred.width,
+    blurred.height,
     x,
     y,
     w,
@@ -1975,22 +2113,25 @@ function mousePressed() {
   platformInvokeAnimal("mousePressed");
 }
 
-function touchStarted() {
-  // Prefer real touch coords — mouseX/Y can lag on the first tap.
-  let x = mouseX;
-  let y = mouseY;
+function platformIntroPointerXY() {
+  // Prefer live touch samples — on the first iOS tap mouseX/Y can still be stale.
   if (typeof touches !== "undefined" && touches.length > 0) {
-    x = touches[0].x;
-    y = touches[0].y;
+    return { x: touches[0].x, y: touches[0].y };
   }
+  return { x: mouseX, y: mouseY };
+}
 
+function touchStarted() {
   // Menu is visible during splash fade-in; accept that tap and finish splash.
   if (platformMode === "intro" || platformCanAcceptIntroPressFromSplash()) {
-    // Always ignore the synthetic mouse click iOS fires after a touch.
-    platformIgnoreNextMousePress = true;
     platformFinishSplashForIntroIfNeeded();
-    // No Web Audio unlock here — it hitchs the zoom. HTML select is enough.
-    platformHandleIntroPress(x, y);
+    let pt = platformIntroPointerXY();
+    let hit = platformHandleIntroPress(pt.x, pt.y);
+    // Only suppress the synthetic mouse click when this touch actually selected
+    // a triangle. Otherwise a miss (stale coords) used to eat the real click.
+    if (hit) {
+      platformIgnoreNextMousePress = true;
+    }
     return false;
   }
 
@@ -2011,7 +2152,8 @@ function touchStarted() {
   }
 
   if (platformShareOpen) {
-    platformHandleSharePointerDown(x, y);
+    let pt = platformIntroPointerXY();
+    platformHandleSharePointerDown(pt.x, pt.y);
     return false;
   }
 
@@ -2530,38 +2672,50 @@ function platformDrawMenuGlassCircle(
 ) {
   let ctx = platformGetDrawCtx(gfx);
   let a = alpha / 255;
-  let frostBlur = ms(15);
+  // Reuse backdrop blur cache (same radius) — a second frost radius forced a
+  // full extra blur bake on open and made iPhone sheet animation stutter.
+  let frostBlur = PLATFORM_SHARE_BACKDROP_BLUR_PX;
   let frostAlpha = (hover ? 0.34 : 0.28) * a;
+  let iosLite = platformIsIosDevice();
 
-  ctx.save();
-  platformClipCircle(ctx, cx, cy, r);
-  ctx.filter = `blur(${ms(22)}px)`;
-  ctx.fillStyle = `rgba(20, 16, 12, ${(hover ? 0.22 : 0.18) * a})`;
-  ctx.fill();
-  ctx.filter = "none";
-  ctx.restore();
+  if (!iosLite) {
+    ctx.save();
+    platformClipCircle(ctx, cx, cy, r);
+    ctx.filter = `blur(${ms(22)}px)`;
+    ctx.fillStyle = `rgba(20, 16, 12, ${(hover ? 0.22 : 0.18) * a})`;
+    ctx.fill();
+    ctx.filter = "none";
+    ctx.restore();
 
-  ctx.save();
-  platformClipCircle(ctx, cx, cy, r);
-  ctx.shadowColor = `rgba(20, 16, 12, ${(hover ? 0.42 : 0.34) * a})`;
-  ctx.shadowBlur = ms(hover ? 28 : 22);
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = ms(hover ? 9 : 7);
-  ctx.fillStyle = `rgba(255, 255, 255, ${0.001 * a})`;
-  ctx.fill();
-  ctx.restore();
+    ctx.save();
+    platformClipCircle(ctx, cx, cy, r);
+    ctx.shadowColor = `rgba(20, 16, 12, ${(hover ? 0.42 : 0.34) * a})`;
+    ctx.shadowBlur = ms(hover ? 28 : 22);
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = ms(hover ? 9 : 7);
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.001 * a})`;
+    ctx.fill();
+    ctx.restore();
 
-  ctx.save();
-  platformClipCircle(ctx, cx, cy, r - ms(1));
-  ctx.shadowColor = `rgba(30, 26, 22, ${(hover ? 0.28 : 0.22) * a})`;
-  ctx.shadowBlur = ms(hover ? 12 : 10);
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = ms(hover ? 4 : 3);
-  ctx.fillStyle = `rgba(255, 255, 255, ${0.001 * a})`;
-  ctx.fill();
-  ctx.restore();
+    ctx.save();
+    platformClipCircle(ctx, cx, cy, r - ms(1));
+    ctx.shadowColor = `rgba(30, 26, 22, ${(hover ? 0.28 : 0.22) * a})`;
+    ctx.shadowBlur = ms(hover ? 12 : 10);
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = ms(hover ? 4 : 3);
+    ctx.fillStyle = `rgba(255, 255, 255, ${0.001 * a})`;
+    ctx.fill();
+    ctx.restore();
+  } else {
+    // Cheap soft drop shadow — WebKit filter/shadowBlur on many circles is laggy.
+    ctx.save();
+    platformClipCircle(ctx, cx + ms(0.5), cy + ms(3), r);
+    ctx.fillStyle = `rgba(20, 16, 12, ${(hover ? 0.2 : 0.14) * a})`;
+    ctx.fill();
+    ctx.restore();
+  }
 
-  if (baseSnap) {
+  if (baseSnap && !iosLite) {
     let blurredFrost = platformGetBlurredSnap(baseSnap, frostBlur);
     ctx.save();
     platformClipCircle(ctx, cx, cy, r);
@@ -3110,6 +3264,7 @@ function platformOpenShare() {
   });
   platformResetShareDragState();
   let p = posterRegistry[platformMode];
+  platformInvalidateBlurSnapCache();
   platformShareOpen = true;
   platformShareOpenTime = millis();
   platformShareCopiedUntil = 0;
@@ -3130,6 +3285,7 @@ function platformCloseShare() {
   platformSharePreviewStill = false;
   platformResetShareDragState();
   platformHideMenuOverlayLayers();
+  platformInvalidateBlurSnapCache();
   if (wasOpen) {
     platformPlayUiCloseSfx();
   }
@@ -3271,6 +3427,7 @@ function platformOpenAnimalMenu() {
     platformCloseShare();
   });
   let p = posterRegistry[platformMode];
+  platformInvalidateBlurSnapCache();
   platformAnimalMenuOpen = true;
   platformAnimalMenuOpenTime = millis();
   platformAnimalMenuBoxes = p ? platformGetAnimalMenuLayout(p) : null;
@@ -3282,6 +3439,7 @@ function platformCloseAnimalMenu() {
   platformAnimalMenuOpen = false;
   platformAnimalMenuBoxes = null;
   platformHideMenuOverlayLayers();
+  platformInvalidateBlurSnapCache();
   if (wasOpen) {
     platformPlayUiCloseSfx();
   }
@@ -4904,7 +5062,10 @@ function platformAdoptOrStartSplash() {
 function platformCanAcceptIntroPressFromSplash() {
   return (
     platformMode === 'splash' &&
-    (platformSplashPhase === 'fadeIn' || platformSplashPhase === 'done')
+    (platformSplashPhase === 'fadeIn' ||
+      platformSplashPhase === 'done' ||
+      // White beat is brief; accept early so the first menu tap is never dropped.
+      platformSplashPhase === 'whiteBeat')
   );
 }
 
@@ -5343,7 +5504,7 @@ function platformStartLoadingForAnimal(animalId) {
 
 function platformHandleIntroPress(x, y) {
   if (platformIntroTransitionActive) {
-    return;
+    return false;
   }
 
   for (let i = 0; i < platformAnimals.length; i++) {
@@ -5371,9 +5532,10 @@ function platformHandleIntroPress(x, y) {
       platformIntroTransitionActive = true;
       platformIntroTransitionIndex = i;
       platformIntroTransitionStart = millis() + platformIntroTransitionSoundLeadMs;
-      return;
+      return true;
     }
   }
+  return false;
 }
 
 function platformEaseInOutSine(x) {
