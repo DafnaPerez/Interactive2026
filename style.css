@@ -65,3 +65,10 @@ canvas {
 #platform-splash-white-canvas {
   background: transparent !important;
 }
+
+#platform-splash svg,
+#platform-splash svg * {
+  forced-color-adjust: none !important;
+  -webkit-forced-color-adjust: none !important;
+  fill-opacity: 1 !important;
+}
