@@ -12,6 +12,7 @@ let platformSessionAnimalId = null;
 let platformIntroHover = -1;
 let platformCanvasReady = false;
 let platformSplashEl = null;
+let platformSplashWhiteCanvas = null;
 let platformSplashStarted = false;
 let platformSplashPhase = "idle"; // idle | preWhite | play | hold | fadeOut | whiteBeat | fadeIn | done
 let platformSplashPhaseStart = 0;
@@ -1080,6 +1081,7 @@ function platformApplyStartupQuery() {
 
 function platformSkipSplashToAnimal(animal) {
   platformTeardownSplashOverlay(true);
+  platformTeardownSplashWhiteCanvas();
   platformSplashPhase = "done";
   platformMode = animal;
   platformSelectedStarted = false;
@@ -4530,7 +4532,11 @@ function platformAddMeshGradient(ctx, cx, cy, maxR, rgb, peakAlpha, kind) {
 function platformDrawMainBackground() {
   noStroke();
   rectMode(CORNER);
-  background("#FFFFFF");
+  // Solid white bitmap fill — Android auto-dark does not recolor canvas pixels
+  // the way it darkens CSS backgrounds.
+  background(255);
+  fill(255);
+  rect(0, 0, platformW, platformH);
 }
 
 // --- Opening splash ---
@@ -4558,6 +4564,9 @@ const PLATFORM_LOGO_SVG =
   "</g></svg>";
 
 function platformDrawSplash() {
+  // Full-viewport white canvas underlay (survives Android dark mode).
+  platformEnsureSplashWhiteCanvas();
+
   if (!platformSplashStarted) {
     platformAdoptOrStartSplash();
     platformDrawMainBackground();
@@ -4638,6 +4647,7 @@ function platformDrawSplash() {
     if (t >= 1) {
       platformSplashPhase = "done";
       platformMode = "intro";
+      platformTeardownSplashWhiteCanvas();
     }
   }
 }
@@ -4649,6 +4659,7 @@ function platformAdoptOrStartSplash() {
   platformSplashStarted = true;
   platformSplashPhase = "preWhite";
   platformSplashPhaseStart = millis();
+  platformEnsureSplashWhiteCanvas();
 }
 
 function platformCanAcceptIntroPressFromSplash() {
@@ -4665,6 +4676,44 @@ function platformFinishSplashForIntroIfNeeded() {
   platformSplashPhase = "done";
   platformMode = "intro";
   platformTeardownSplashOverlay(true);
+  platformTeardownSplashWhiteCanvas();
+}
+
+function platformTeardownSplashWhiteCanvas() {
+  if (!platformSplashWhiteCanvas) {
+    return;
+  }
+  if (platformSplashWhiteCanvas.parentNode) {
+    platformSplashWhiteCanvas.parentNode.removeChild(platformSplashWhiteCanvas);
+  }
+  platformSplashWhiteCanvas = null;
+}
+
+function platformEnsureSplashWhiteCanvas() {
+  if (platformSplashWhiteCanvas || typeof document === "undefined") {
+    return platformSplashWhiteCanvas;
+  }
+
+  // Pixel-filled canvas stretched full viewport. Auto-dark recolors CSS, not
+  // canvas bitmap content — same reason the rest of the app stays light.
+  let c = document.createElement("canvas");
+  c.id = "platform-splash-white-canvas";
+  c.width = 16;
+  c.height = 16;
+  c.setAttribute("aria-hidden", "true");
+  let ctx = c.getContext("2d", { alpha: false });
+  if (ctx) {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, 16, 16);
+  }
+  c.style.cssText =
+    "position:fixed;left:0;top:0;right:0;bottom:0;width:100%;height:100%;" +
+    "min-height:100dvh;min-height:-webkit-fill-available;z-index:38;" +
+    "display:block;pointer-events:none;border:0;margin:0;padding:0;" +
+    "image-rendering:pixelated;";
+  document.body.appendChild(c);
+  platformSplashWhiteCanvas = c;
+  return c;
 }
 
 function platformTeardownSplashOverlay(forceRemove) {
@@ -4690,44 +4739,49 @@ function platformBeginSplashFadeOut() {
   }
 }
 
-function platformGetSplashLogoStageSize() {
-  // Prefer the on-screen canvas box (matches the game frame in Chrome).
-  // Fall back to viewport, with a floor so letterboxing can't shrink the logo.
-  let canvas =
-    typeof document !== "undefined"
-      ? document.querySelector("canvas.p5Canvas") ||
-        document.querySelector("canvas")
-      : null;
-  let canvasW = 0;
-  if (canvas && typeof canvas.getBoundingClientRect === "function") {
-    canvasW = canvas.getBoundingClientRect().width || canvas.clientWidth || 0;
+function platformIsAndroidChrome() {
+  if (typeof navigator === "undefined") {
+    return false;
   }
-  let vv =
-    typeof window !== "undefined" && window.visualViewport
-      ? window.visualViewport.width
-      : 0;
-  let screenW = Math.max(
-    vv,
-    typeof window !== "undefined" ? window.innerWidth || 0 : 0
-  );
-  let baseW = Math.max(canvasW, screenW, platformW);
-  // ~72% of frame, keep within a stable phone-sized range.
-  let w = Math.min(320, Math.max(260, baseW * 0.72));
-  let h = w * (318.5 / 297.81);
-  return { w, h };
+  let ua = navigator.userAgent || "";
+  if (!/Android/i.test(ua)) {
+    return false;
+  }
+  // Exclude other Android browsers that also mention Chrome in the UA.
+  if (/SamsungBrowser|Firefox|EdgA|OPR|YaBrowser|CriOS/i.test(ua)) {
+    return false;
+  }
+  return /Chrome\/\d+/i.test(ua);
+}
+
+function platformApplySplashLogoStageSize(stage) {
+  if (!stage) {
+    return;
+  }
+  // Original size everywhere; Android Chrome only gets a slight bump because
+  // 58vw/240 reads smaller there than on iPhone / other Android browsers.
+  let androidChrome = platformIsAndroidChrome();
+  stage.style.position = "relative";
+  stage.style.zIndex = "1";
+  stage.style.flexShrink = "0";
+  stage.style.flexGrow = "0";
+  stage.style.height = "auto";
+  stage.style.aspectRatio = "298 / 319";
+  stage.style.maxWidth = "280px";
+  if (androidChrome) {
+    stage.style.width = "min(68vw, 280px)";
+  } else {
+    stage.style.width = "min(58vw, 240px)";
+  }
 }
 
 function platformSyncSplashLogoStageSize() {
   if (!platformSplashEl) {
     return;
   }
-  let stage = platformSplashEl.querySelector(".platform-splash-stage");
-  if (!stage) {
-    return;
-  }
-  let logoSize = platformGetSplashLogoStageSize();
-  stage.style.width = logoSize.w + "px";
-  stage.style.height = logoSize.h + "px";
+  platformApplySplashLogoStageSize(
+    platformSplashEl.querySelector(".platform-splash-stage")
+  );
 }
 
 function platformEnsureSplashOverlay() {
@@ -4738,34 +4792,22 @@ function platformEnsureSplashOverlay() {
   let wrap = document.createElement("div");
   wrap.id = "platform-splash";
   wrap.setAttribute("aria-hidden", "true");
+  // Transparent shell — white comes from the pixel canvas underlay + p5 fill,
+  // which Android dark mode does not recolor like CSS backgrounds.
   wrap.style.cssText =
     "position:fixed;left:0;top:0;right:0;bottom:0;width:100%;height:100%;" +
     "min-height:100dvh;min-height:-webkit-fill-available;z-index:40;" +
     "display:flex;align-items:center;justify-content:center;" +
-    "background:#FFFFFF;background-color:#FFFFFF;" +
-    "background-image:linear-gradient(#FFFFFF,#FFFFFF);" +
-    "color-scheme:only light;forced-color-adjust:none;" +
-    "-webkit-forced-color-adjust:none;pointer-events:none;opacity:1;";
+    "background:transparent;pointer-events:none;opacity:1;";
 
-  // Extra opaque white layer — some Android browsers still darken plain bg colors.
-  let bg = document.createElement("div");
-  bg.id = "platform-splash-bg";
-  wrap.appendChild(bg);
-
-  let logoSize = platformGetSplashLogoStageSize();
   let stage = document.createElement("div");
   stage.className = "platform-splash-stage";
-  stage.style.cssText =
-    "position:relative;z-index:1;width:" +
-    logoSize.w +
-    "px;height:" +
-    logoSize.h +
-    "px;flex-shrink:0;flex-grow:0;visibility:hidden;";
+  stage.style.visibility = "hidden";
+  platformApplySplashLogoStageSize(stage);
   stage.innerHTML = PLATFORM_LOGO_SVG;
   wrap.appendChild(stage);
   document.body.appendChild(wrap);
   platformSplashEl = wrap;
-  platformSyncSplashLogoStageSize();
 
   let svg = stage.querySelector("svg");
   if (svg) {
@@ -4786,7 +4828,6 @@ function platformEnsureSplashOverlay() {
       platformAnimateSplashPieces(svg);
       requestAnimationFrame(() => {
         stage.style.visibility = "visible";
-        platformSyncSplashLogoStageSize();
       });
     });
   } else {
