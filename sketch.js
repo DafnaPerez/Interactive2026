@@ -4691,22 +4691,43 @@ function platformBeginSplashFadeOut() {
 }
 
 function platformGetSplashLogoStageSize() {
-  // Size from the p5 canvas CSS box so Android/iPhone match the same app frame.
-  // (58vw can disagree with the scaled canvas on Android Chrome.)
+  // Prefer the on-screen canvas box (matches the game frame in Chrome).
+  // Fall back to viewport, with a floor so letterboxing can't shrink the logo.
   let canvas =
     typeof document !== "undefined"
       ? document.querySelector("canvas.p5Canvas") ||
         document.querySelector("canvas")
       : null;
-  let baseW =
-    canvas && canvas.clientWidth > 0
-      ? canvas.clientWidth
-      : typeof window !== "undefined"
-        ? window.innerWidth
-        : platformW;
-  let w = Math.min(baseW * 0.58, 240);
+  let canvasW = 0;
+  if (canvas && typeof canvas.getBoundingClientRect === "function") {
+    canvasW = canvas.getBoundingClientRect().width || canvas.clientWidth || 0;
+  }
+  let vv =
+    typeof window !== "undefined" && window.visualViewport
+      ? window.visualViewport.width
+      : 0;
+  let screenW = Math.max(
+    vv,
+    typeof window !== "undefined" ? window.innerWidth || 0 : 0
+  );
+  let baseW = Math.max(canvasW, screenW, platformW);
+  // ~72% of frame, keep within a stable phone-sized range.
+  let w = Math.min(320, Math.max(260, baseW * 0.72));
   let h = w * (318.5 / 297.81);
   return { w, h };
+}
+
+function platformSyncSplashLogoStageSize() {
+  if (!platformSplashEl) {
+    return;
+  }
+  let stage = platformSplashEl.querySelector(".platform-splash-stage");
+  if (!stage) {
+    return;
+  }
+  let logoSize = platformGetSplashLogoStageSize();
+  stage.style.width = logoSize.w + "px";
+  stage.style.height = logoSize.h + "px";
 }
 
 function platformEnsureSplashOverlay() {
@@ -4718,26 +4739,41 @@ function platformEnsureSplashOverlay() {
   wrap.id = "platform-splash";
   wrap.setAttribute("aria-hidden", "true");
   wrap.style.cssText =
-    "position:fixed;inset:0;z-index:40;display:flex;align-items:center;" +
-    "justify-content:center;background:#FFFFFF;background-color:#FFFFFF;" +
-    "color-scheme:only light;pointer-events:none;opacity:1;";
+    "position:fixed;left:0;top:0;right:0;bottom:0;width:100%;height:100%;" +
+    "min-height:100dvh;min-height:-webkit-fill-available;z-index:40;" +
+    "display:flex;align-items:center;justify-content:center;" +
+    "background:#FFFFFF;background-color:#FFFFFF;" +
+    "background-image:linear-gradient(#FFFFFF,#FFFFFF);" +
+    "color-scheme:only light;forced-color-adjust:none;" +
+    "-webkit-forced-color-adjust:none;pointer-events:none;opacity:1;";
+
+  // Extra opaque white layer — some Android browsers still darken plain bg colors.
+  let bg = document.createElement("div");
+  bg.id = "platform-splash-bg";
+  wrap.appendChild(bg);
 
   let logoSize = platformGetSplashLogoStageSize();
   let stage = document.createElement("div");
+  stage.className = "platform-splash-stage";
   stage.style.cssText =
-    "width:" +
+    "position:relative;z-index:1;width:" +
     logoSize.w +
     "px;height:" +
     logoSize.h +
-    "px;flex-shrink:0;flex-grow:0;" +
-    "position:relative;visibility:hidden;";
+    "px;flex-shrink:0;flex-grow:0;visibility:hidden;";
   stage.innerHTML = PLATFORM_LOGO_SVG;
   wrap.appendChild(stage);
   document.body.appendChild(wrap);
   platformSplashEl = wrap;
+  platformSyncSplashLogoStageSize();
 
   let svg = stage.querySelector("svg");
   if (svg) {
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", "100%");
+    svg.style.width = "100%";
+    svg.style.height = "100%";
+    svg.style.display = "block";
     // Hide every piece before first paint so we never flash the assembled logo.
     Array.from(svg.querySelectorAll("polygon, path")).forEach((el) => {
       el.style.opacity = "0";
@@ -4750,6 +4786,7 @@ function platformEnsureSplashOverlay() {
       platformAnimateSplashPieces(svg);
       requestAnimationFrame(() => {
         stage.style.visibility = "visible";
+        platformSyncSplashLogoStageSize();
       });
     });
   } else {
@@ -5577,6 +5614,7 @@ function platformApplyViewportLayout() {
   }
 
   platformFitCanvasToScreen();
+  platformSyncSplashLogoStageSize();
 }
 
 function platformBindViewportListeners() {
@@ -5617,6 +5655,10 @@ function platformFitCanvasToScreen() {
   cnv.style.height = cssH + "px";
   cnv.style.display = "block";
   cnv.style.position = "fixed";
+  cnv.style.backgroundColor = "#ffffff";
+  cnv.style.setProperty("background-color", "#ffffff", "important");
+  cnv.style.setProperty("forced-color-adjust", "none", "important");
+  cnv.style.setProperty("-webkit-forced-color-adjust", "none", "important");
   cnv.style.margin = "0";
   cnv.style.transform = "none";
 
