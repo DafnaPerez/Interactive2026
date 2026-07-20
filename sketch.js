@@ -625,8 +625,60 @@ function platformIsAndroidDevice() {
   return /Android/i.test(navigator.userAgent);
 }
 
+function platformDesiredPixelDensity() {
+  let dpr = 1;
+  if (typeof window !== "undefined" && window.devicePixelRatio) {
+    dpr = window.devicePixelRatio;
+  }
+  let dd = 1;
+  try {
+    dd = displayDensity() || 1;
+  } catch (e) {
+    // p5 not ready yet
+  }
+  // Some Android WebViews under-report one of these — take the sharper reading.
+  return min(max(dpr, dd, 1), 3);
+}
+
 function platformApplyPixelDensity() {
-  pixelDensity(displayDensity());
+  let d = platformDesiredPixelDensity();
+  pixelDensity(d);
+
+  // If the backing store is still 1× after CSS upscaling, Android looks blocky.
+  let cnv =
+    typeof drawingContext !== "undefined" && drawingContext
+      ? drawingContext.canvas
+      : typeof document !== "undefined"
+        ? document.querySelector("canvas")
+        : null;
+  if (!cnv) {
+    return;
+  }
+  let needW = Math.round(platformW * d);
+  let needH = Math.round(platformH * d);
+  if (Math.abs(cnv.width - needW) > 1 || Math.abs(cnv.height - needH) > 1) {
+    pixelDensity(d);
+    resizeCanvas(platformW, platformH);
+  }
+}
+
+function platformEnsureHiDpiCanvas() {
+  let cnv =
+    typeof drawingContext !== "undefined" && drawingContext
+      ? drawingContext.canvas
+      : typeof document !== "undefined"
+        ? document.querySelector("canvas")
+        : null;
+  if (!cnv) {
+    return;
+  }
+  let d = platformDesiredPixelDensity();
+  let needW = Math.round(platformW * d);
+  let needH = Math.round(platformH * d);
+  if (Math.abs(cnv.width - needW) > 1 || Math.abs(cnv.height - needH) > 1) {
+    pixelDensity(d);
+    resizeCanvas(platformW, platformH);
+  }
 }
 
 function platformLooseAndroidHeavyAnimal(p) {
@@ -1238,8 +1290,8 @@ function platformLoadAllGameAssets() {
 }
 
 function platformApplyCanvasSize() {
-  platformApplyPixelDensity();
   resizeCanvas(platformW, platformH);
+  platformApplyPixelDensity();
   platformApplyViewportLayout();
 }
 
@@ -2008,8 +2060,9 @@ function platformNotifyFinalReveal(p) {
 // setup / draw / mouse / touch / resize / Escape routing.
 
 function setup() {
-  platformApplyPixelDensity();
   let cnv = createCanvas(platformW, platformH);
+  // Density must be set after createCanvas so Android Chrome gets a true HiDPI buffer.
+  platformApplyPixelDensity();
   let mainEl = document.querySelector("main");
 
   if (mainEl) {
@@ -5901,8 +5954,11 @@ function platformFitCanvasToScreen() {
     return;
   }
 
-  let cssW = platformW * platformScreenScale;
-  let cssH = platformH * platformScreenScale;
+  // Keep the bitmap at device pixels whenever layout runs (Android can reset it).
+  platformEnsureHiDpiCanvas();
+
+  let cssW = Math.round(platformW * platformScreenScale);
+  let cssH = Math.round(platformH * platformScreenScale);
 
   cnv.style.width = cssW + "px";
   cnv.style.height = cssH + "px";
@@ -5912,6 +5968,7 @@ function platformFitCanvasToScreen() {
   cnv.style.setProperty("background-color", "#ffffff", "important");
   cnv.style.setProperty("forced-color-adjust", "none", "important");
   cnv.style.setProperty("-webkit-forced-color-adjust", "none", "important");
+  cnv.style.imageRendering = "auto";
   cnv.style.margin = "0";
   cnv.style.transform = "none";
 

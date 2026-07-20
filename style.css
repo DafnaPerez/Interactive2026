@@ -51,4 +51,5 @@ canvas {
   background-color: #ffffff !important;
   forced-color-adjust: none;
   -webkit-forced-color-adjust: none;
+  image-rendering: auto;
 }
