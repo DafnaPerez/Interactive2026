@@ -4690,6 +4690,25 @@ function platformBeginSplashFadeOut() {
   }
 }
 
+function platformGetSplashLogoStageSize() {
+  // Size from the p5 canvas CSS box so Android/iPhone match the same app frame.
+  // (58vw can disagree with the scaled canvas on Android Chrome.)
+  let canvas =
+    typeof document !== "undefined"
+      ? document.querySelector("canvas.p5Canvas") ||
+        document.querySelector("canvas")
+      : null;
+  let baseW =
+    canvas && canvas.clientWidth > 0
+      ? canvas.clientWidth
+      : typeof window !== "undefined"
+        ? window.innerWidth
+        : platformW;
+  let w = Math.min(baseW * 0.58, 240);
+  let h = w * (318.5 / 297.81);
+  return { w, h };
+}
+
 function platformEnsureSplashOverlay() {
   if (platformSplashEl || typeof document === "undefined") {
     return platformSplashEl;
@@ -4703,9 +4722,14 @@ function platformEnsureSplashOverlay() {
     "justify-content:center;background:#FFFFFF;background-color:#FFFFFF;" +
     "color-scheme:only light;pointer-events:none;opacity:1;";
 
+  let logoSize = platformGetSplashLogoStageSize();
   let stage = document.createElement("div");
   stage.style.cssText =
-    "width:min(58vw, 240px);max-width:280px;aspect-ratio:298 / 319;" +
+    "width:" +
+    logoSize.w +
+    "px;height:" +
+    logoSize.h +
+    "px;flex-shrink:0;flex-grow:0;" +
     "position:relative;visibility:hidden;";
   stage.innerHTML = PLATFORM_LOGO_SVG;
   wrap.appendChild(stage);
