@@ -28,6 +28,7 @@ jobs:
         run: |
           mkdir -p _site/sfx
           cp index.html sketch.js style.css _site/
+          cp logo.svg _site/ 2>/dev/null || true
           cp *.png *.otf _site/ 2>/dev/null || true
           cp sfx/* _site/sfx/ 2>/dev/null || true
           cp .nojekyll _site/
