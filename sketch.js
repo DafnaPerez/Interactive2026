@@ -627,11 +627,11 @@ function platformIsAndroidDevice() {
 
 function platformApplyPixelDensity() {
   // Android Chromium + many triangles (gazelle especially) hitch at high DPR.
-  let d = displayDensity();
+  // Cap hard at 1 — even 1.25× was still too heavy for 33–38 piece connect.
   if (platformIsAndroidDevice()) {
-    pixelDensity(min(1.25, d));
+    pixelDensity(1);
   } else {
-    pixelDensity(d);
+    pixelDensity(displayDensity());
   }
 }
 
@@ -943,9 +943,16 @@ const PLATFORM_DEER_FINAL_ORIGIN_Y =
 
 let platformTriangleDrawPass = 0;
 let platformSuppressAnimalPieceDraw = false;
+let platformAnimalDrawAllPieces = false;
 const platformAssembledDrawThreshold = 0.82;
 
 function platformPrepareAnimalPieceDraw(t) {
+  // Android gazelle/toad single pass must draw every piece (no pass-1 layer).
+  if (platformAnimalDrawAllPieces) {
+    platformSuppressAnimalPieceDraw = false;
+    return true;
+  }
+
   if (platformTriangleDrawPass === 0) {
     platformSuppressAnimalPieceDraw = t >= platformAssembledDrawThreshold;
   } else {
@@ -971,12 +978,10 @@ function posterDrawAnimalMobile(p) {
   translate(-ANIMAL_REF_W / 2, -ANIMAL_ANCHOR_Y);
 
   // Android gazelle/toad: one draw pass while connecting — dual pass doubles
-  // 38+ piece transform/repel cost and is the main hitch source.
+  // 38+ piece transform cost. Draw all pieces in that single pass.
   let singlePass = platformLooseAndroidHeavyAnimal(p);
+  platformAnimalDrawAllPieces = singlePass;
   platformTriangleDrawPass = 0;
-  if (singlePass) {
-    platformSuppressAnimalPieceDraw = false;
-  }
   p.cfg.drawAnimal();
 
   if (!singlePass) {
@@ -985,6 +990,7 @@ function posterDrawAnimalMobile(p) {
   }
 
   platformTriangleDrawPass = 0;
+  platformAnimalDrawAllPieces = false;
   platformSuppressAnimalPieceDraw = false;
   pop();
 }
@@ -1168,9 +1174,7 @@ const platformText = {
     instagram: "Instagram",
     facebook: "Facebook",
     copied: "Link copied — paste in Instagram",
-    copiedOpeningInstagram: "Caption copied — pick Instagram for the image",
-    copiedOpeningFacebook: "Opening Facebook — text ready for your post",
-    instagramFallback: "Caption copied — open Instagram and paste it",
+    copiedFacebook: "Link copied — paste in Facebook",
     close: "Not now",
     back: "try another animal >>"
   }
@@ -2909,22 +2913,12 @@ function platformDrawChoiceButton(bx, by, bw, bh, cornerR, hover = false, alpha 
 
   ctx.save();
   platformClipCircle(ctx, cx, cy, r);
-  if (platformIsAndroidDevice()) {
-    // shadowBlur is expensive on Android Chromium while triangles are connecting.
-    ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
-    ctx.fill();
-    ctx.fillStyle = `rgba(132, 124, 114, ${(hover ? 0.08 : 0.05) * a})`;
-    ctx.beginPath();
-    ctx.arc(cx, cy + ms(2), r, 0, Math.PI * 2);
-    ctx.fill();
-  } else {
-    ctx.shadowColor = `rgba(132, 124, 114, ${(hover ? 0.11 : 0.08) * a})`;
-    ctx.shadowBlur = ms(hover ? 22 : 18);
-    ctx.shadowOffsetX = 0;
-    ctx.shadowOffsetY = ms(hover ? 4 : 3);
-    ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
-    ctx.fill();
-  }
+  ctx.shadowColor = `rgba(132, 124, 114, ${(hover ? 0.11 : 0.08) * a})`;
+  ctx.shadowBlur = ms(hover ? 22 : 18);
+  ctx.shadowOffsetX = 0;
+  ctx.shadowOffsetY = ms(hover ? 4 : 3);
+  ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+  ctx.fill();
   ctx.restore();
 
   ctx.save();
@@ -3818,158 +3812,16 @@ function platformShowShareCopiedMessage(message, durationMs = 2400) {
   platformShareCopiedUntil = millis() + durationMs;
 }
 
-function platformGetShareImageCanvas(p) {
-  let still = platformBakeSharePreviewStill(p);
-  if (!still) {
-    return null;
-  }
-  return still.canvas || still.elt || null;
-}
-
-function platformCanvasToImageFile(canvas, fileName) {
-  if (!canvas || typeof canvas.toDataURL !== "function") {
-    return null;
-  }
-  try {
-    let dataUrl = canvas.toDataURL("image/png");
-    let parts = dataUrl.split(",");
-    if (parts.length < 2) {
-      return null;
-    }
-    let mimeMatch = parts[0].match(/:(.*?);/);
-    let mime = (mimeMatch && mimeMatch[1]) || "image/png";
-    let binary = atob(parts[1]);
-    let bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    return new File([bytes], fileName || "wildlife-poster.png", { type: mime });
-  } catch (err) {
-    return null;
-  }
-}
-
-function platformGetShareImageFile(p) {
-  let canvas = platformGetShareImageCanvas(p);
-  let animalId = (p && p.id) || platformMode || "poster";
-  return platformCanvasToImageFile(canvas, animalId + "-poster.png");
-}
-
-function platformDownloadShareImage(p) {
-  let canvas = platformGetShareImageCanvas(p);
-  if (!canvas || typeof document === "undefined") {
-    return false;
-  }
-  try {
-    let link = document.createElement("a");
-    link.href = canvas.toDataURL("image/png");
-    link.download = ((p && p.id) || "wildlife") + "-poster.png";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    return true;
-  } catch (err) {
-    return false;
-  }
-}
-
 function platformShareViaInstagram(p) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
   platformPlaySfx("share");
-  let payload = platformGetSharePayload(p);
-  // Caption can't reliably be injected into Instagram from the web — copy it.
-  platformCopyShareText(payload.text);
-
-  let file = platformGetShareImageFile(p);
-  let shareData = file ? { files: [file], title: "" } : null;
-
-  // Best path: system share sheet with the animal image. User picks Instagram
-  // (Stories / Feed / Messages). Caption is already on the clipboard.
-  if (
-    shareData &&
-    typeof navigator !== "undefined" &&
-    typeof navigator.canShare === "function" &&
-    navigator.canShare(shareData) &&
-    typeof navigator.share === "function"
-  ) {
-    navigator
-      .share(shareData)
-      .then(() => {
-        platformShowShareCopiedMessage(platformText.share.copiedOpeningInstagram);
-      })
-      .catch((err) => {
-        if (err && err.name === "AbortError") {
-          return;
-        }
-        platformShareInstagramFallback(p, payload);
-      });
-    return;
-  }
-
-  platformShareInstagramFallback(p, payload);
-}
-
-function platformShareInstagramFallback(p, payload) {
-  platformCopyShareText(payload.text);
-  platformDownloadShareImage(p);
-  platformShowShareCopiedMessage(platformText.share.instagramFallback);
-
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  // Open Instagram; user creates a post from the saved image and pastes caption.
-  let opened = false;
-  try {
-    window.location.href = "instagram://app";
-    opened = true;
-  } catch (err) {
-    opened = false;
-  }
-  if (!opened || !platformIsTouchLikeDevice()) {
-    platformOpenExternalUrl("https://www.instagram.com/");
-  }
+  platformCopyShareText(platformGetSharePayload(p).text);
+  platformShowShareCopiedMessage(platformText.share.copied);
 }
 
 function platformShareViaFacebook(p) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
   platformPlaySfx("share");
-  let payload = platformGetSharePayload(p);
-  // Facebook often strips prefilled "quote" text — clipboard is the reliable backup.
-  platformCopyShareText(payload.text);
-  platformShowShareCopiedMessage(platformText.share.copiedOpeningFacebook);
-
-  let u = encodeURIComponent(payload.url);
-  let q = encodeURIComponent(payload.message);
-  let sharer =
-    "https://www.facebook.com/sharer/sharer.php?u=" + u + "&quote=" + q;
-
-  if (platformIsAndroidDevice()) {
-    // Prefer the Facebook app via Android intent, fall back to the web sharer.
-    window.location.href =
-      "intent://www.facebook.com/sharer/sharer.php?u=" +
-      u +
-      "&quote=" +
-      q +
-      "#Intent;scheme=https;package=com.facebook.katana;S.browser_fallback_url=" +
-      encodeURIComponent(sharer) +
-      ";end";
-    return;
-  }
-
-  if (platformIsTouchLikeDevice()) {
-    // iPhone / mobile: https sharer usually hands off into the Facebook app.
-    window.location.href = sharer;
-    return;
-  }
-
-  platformOpenExternalUrl(sharer);
+  platformCopyShareText(platformGetSharePayload(p).text);
+  platformShowShareCopiedMessage(platformText.share.copiedFacebook);
 }
 
 function platformGetShareSheetHeight() {
@@ -7448,6 +7300,11 @@ function platformWarmLooseRepelAfterConnect(p, blend = 0.62) {
     return;
   }
 
+  // Android gazelle/toad skip live repel; warming all pieces spikes the tap frame.
+  if (platformLooseAndroidHeavyAnimal(p)) {
+    return;
+  }
+
   let profile = platformLooseGetProfile(cfg);
 
   if (!profile.hyenaStyleRepel) {
@@ -7788,19 +7645,13 @@ function platformLooseApplyPushDelta(
     return { x: offsetX, y: offsetY };
   }
 
-  let profile = platformLooseGetProfile(p.cfg);
-
-  // Android gazelle/toad: reuse last smoothed repel on odd frames (halves CPU).
-  if (
-    platformLooseAndroidHeavyAnimal(p) &&
-    profile.hyenaStyleRepel &&
-    frameCount % 2 === 1 &&
-    p.looseRepelSmooth &&
-    p.looseRepelSmooth[index]
-  ) {
-    let prev = p.looseRepelSmooth[index];
-    return { x: offsetX + prev.x, y: offsetY + prev.y };
+  // Android gazelle/toad: scatter slots already keep clearance. Live bbox
+  // separation was the main Chrome hitch (tens of iters × 30+ loose pieces).
+  if (platformLooseAndroidHeavyAnimal(p)) {
+    return { x: offsetX, y: offsetY };
   }
+
+  let profile = platformLooseGetProfile(p.cfg);
 
   if (p.cfg.getPieceGroup) {
     let cleared = platformLooseApplyGroupedRepel(
@@ -9322,15 +9173,49 @@ function platformApplyLoosePieceTransform(p, index, t) {
   }
 
   // Stage 3 — motion: float wobble, zone push, assemble lerp
+  let androidHeavy = platformLooseAndroidHeavyAnimal(p);
+
+  // Near-assembled pieces already draw at rest on Android single-pass; skip
+  // the full float/push path early so connecting frames stay light.
+  if (androidHeavy && t >= 0.55 && p.disassembleBoost <= 0 && p.disassembleRepelWarmup <= 0) {
+    let assembleT = platformEaseInOutSine(t);
+    let pulseScale = platformGetLoosePositivePulseScale(p, t);
+    let assembleLiftY = 0;
+
+    if (profile.assembledScreenLift > 0) {
+      let dt = platformLooseGetDrawTransform(cfg);
+      assembleLiftY =
+        assembleT *
+        platformScreenPxToAnimalRefY(profile.assembledScreenLift) /
+        max(abs(dt.scaleY), 0.001);
+    }
+
+    let pieceFall = wrongFallGetPieceDrawOffset(p, index, cfg);
+    let currentX = lerp(target.x, 0, assembleT);
+    let currentY = lerp(target.y, 0, assembleT);
+    let currentRot = lerp(off.rot || 0, 0, assembleT);
+
+    translate(
+      pivot.x + currentX + pieceFall.x,
+      pivot.y + currentY - assembleLiftY + pieceFall.y
+    );
+    scale(pulseScale);
+    rotate(currentRot + pieceFall.rot);
+    translate(-pivot.x, -pivot.y);
+    return;
+  }
+
   let wobble = off.wobble || 1;
-  let wobbleDampen = platformGetLooseWobbleDampen(
-    p,
-    pieceGroup,
-    pivot.x + target.x,
-    pivot.y + target.y,
-    t,
-    index
-  );
+  let wobbleDampen = androidHeavy
+    ? 1
+    : platformGetLooseWobbleDampen(
+        p,
+        pieceGroup,
+        pivot.x + target.x,
+        pivot.y + target.y,
+        t,
+        index
+      );
   if (profile.dampenWobbleNearBody === false) {
     wobbleDampen = 1;
   }
@@ -9342,26 +9227,43 @@ function platformApplyLoosePieceTransform(p, index, t) {
   let rotNearBody =
     profile.dampenWobbleNearBody !== false ? wobbleDampen : 1;
   let animFrame = platformSharePreviewStill ? platformShareFrozenFrame : frameCount;
-  let spaceRot =
-    (off.rot + sin(animFrame * 0.004 + off.phase) * 0.16 * wobbleDampen) *
-    rotNearBody;
-  let softFloatX =
-    sin(animFrame * off.speedX + off.phase + index * 1.7) *
-    profile.floatAmp *
-    wobble *
-    wobbleDampen;
-  let softFloatY =
-    cos(animFrame * off.speedY + off.phase + index * 1.3) *
-    profile.floatAmp *
-    wobble *
-    wobbleDampen;
+  let spaceRot;
+  let softFloatX;
+  let softFloatY;
 
-  let maxAssembly = max(p.tGroup[0], p.tGroup[1], p.tGroup[2], p.tGroup[3]);
-  let floatHold = platformSmoothStep(0.02, 0.16, maxAssembly);
+  if (androidHeavy) {
+    // Static phase offset only — no per-frame sin/cos for 30+ pieces.
+    if (off._androidFloatX == null) {
+      off._androidFloatX =
+        sin(off.phase + index * 1.7) * profile.floatAmp * wobble * 0.45;
+      off._androidFloatY =
+        cos(off.phase + index * 1.3) * profile.floatAmp * wobble * 0.45;
+    }
+    spaceRot = (off.rot || 0) * rotNearBody;
+    softFloatX = off._androidFloatX;
+    softFloatY = off._androidFloatY;
+  } else {
+    spaceRot =
+      (off.rot + sin(animFrame * 0.004 + off.phase) * 0.16 * wobbleDampen) *
+      rotNearBody;
+    softFloatX =
+      sin(animFrame * off.speedX + off.phase + index * 1.7) *
+      profile.floatAmp *
+      wobble *
+      wobbleDampen;
+    softFloatY =
+      cos(animFrame * off.speedY + off.phase + index * 1.3) *
+      profile.floatAmp *
+      wobble *
+      wobbleDampen;
 
-  if (wobbleDampen < 0.4 && p.cfg.id !== "toad") {
-    softFloatX *= floatHold;
-    softFloatY *= floatHold;
+    let maxAssembly = max(p.tGroup[0], p.tGroup[1], p.tGroup[2], p.tGroup[3]);
+    let floatHold = platformSmoothStep(0.02, 0.16, maxAssembly);
+
+    if (wobbleDampen < 0.4 && p.cfg.id !== "toad") {
+      softFloatX *= floatHold;
+      softFloatY *= floatHold;
+    }
   }
 
   // Push applies to the stable home — float/rotation wobble is added after repulsion.
@@ -9390,7 +9292,7 @@ function platformApplyLoosePieceTransform(p, index, t) {
     spaceY = clamped.y;
   }
 
-  if (profile.choiceKeepOut && t < 0.92) {
+  if (profile.choiceKeepOut && t < 0.92 && !androidHeavy) {
     let aboveChoice = platformLooseClampTargetAboveChoice(
       cfg,
       spaceX,
@@ -9482,9 +9384,14 @@ function platformDrawTri(hexColor, p1, p2, p3, weight = 1.1) {
   }
 
   fill(hexColor);
-  stroke(hexColor);
-  strokeWeight(weight);
-  strokeJoin(ROUND);
+  // Stroke sealing is expensive on Android Chromium with 30+ tris/frame.
+  if (platformAnimalDrawAllPieces) {
+    noStroke();
+  } else {
+    stroke(hexColor);
+    strokeWeight(weight);
+    strokeJoin(ROUND);
+  }
   triangle(p1[0], p1[1], p2[0], p2[1], p3[0], p3[1]);
 }
 
@@ -11548,10 +11455,8 @@ function posterHandleChoicePress(id) {
     platformStartProgressFill(p, newCount);
 
     if (id === "toad") {
-      // Android: skip the heavy warm-all-pieces spike; lighter boost is enough.
-      if (platformIsAndroidDevice()) {
-        p.toadRepelBoost = 36;
-      } else {
+      // Android: skip warm-all-pieces + boost (live repel is off for toad there).
+      if (!platformIsAndroidDevice()) {
         p.toadRepelBoost = 160;
         platformToadWarmLooseRepel(p);
       }
@@ -12214,68 +12119,10 @@ function drawDeerAnimal() {
   rotate(bodyTilt);
   scale(p.deer.scale);
 
-  let pts = {
-    // neck / body
-    neckTop: [225, 400],
-    neckMid: [195, 450],
-    neckBase: [240, 480],
-    chest: [220, 540],
-    shoulder: [270, 570],
-    shoulderFront: [316, 580],
-    shoulderBack: [352, 570],
-    bellyLine: [420, 550],
-    backTop: [550, 430],
-    rump: [610, 500],
-    hipLower: [550, 560],
-    hipFront: [516, 560],
-    hipBack: [590, 544],
-
-    // head
-    leftEarTip: [48, 332],
-    leftEarBase: [112, 360],
-    leftEarLow: [85, 398],
-    rightEarTip: [255, 348],
-    rightEarBase: [182, 375],
-    rightEarLow: [210, 407],
-    leftHornBaseA: [112, 360],
-    leftHornBaseB: [137, 364],
-    leftHornKnee: [92, 258],
-    leftHornTip: [112, 170],
-    leftHornInner: [112, 258],
-
-    rightHornBaseA: [170, 374],
-    rightHornBaseB: [198, 382],
-    rightHornKnee: [232, 258],
-    rightHornTip: [205, 170],
-    rightHornInner: [214, 258],
-
-    headFront: [112, 360],
-    headCenter: [170, 374],
-    noseTip: [60, 420],
-    jawBottom: [76, 444],
-    headBack: [222, 398],
-    jawAngle: [190, 450],
-
-    // front legs
-    frontNearKnee: [304, 688],
-    frontNearHoof: [232, 824],
-    frontFarKneeA: [331, 688],
-    frontFarKneeB: [314, 688],
-    frontFarHoof: [348, 824],
-
-    // back legs
-    backNearKneeA: [575, 668],
-    backNearKneeB: [560, 682],
-    backNearHoof: [490, 824],
-
-    backFarKneeA: [610, 670],
-    backFarKneeB: [596, 684],
-    backFarHoof: [626, 824],
-
-    tailBaseTop: [600, 506],
-    tailBaseLow: [580, 536],
-    tailTip: [636, 522]
-  };
+  // Reuse static mesh while connecting — avoids allocating ~80 point arrays/frame.
+  let pts = finalAlive
+    ? platformCloneDeerBasePts()
+    : platformGetDeerBasePts();
 
   if (finalAlive) {
     // Phase-shifted legs: every leg participates in the same gait cycle,
@@ -12472,6 +12319,89 @@ function applyDeerPieceTransform(index, t) {
   platformApplyLoosePieceTransform(posterRegistry.deer, index, t);
 }
 
+let platformDeerBasePtsCache = null;
+
+function platformGetDeerBasePts() {
+  if (!platformDeerBasePtsCache) {
+    platformDeerBasePtsCache = {
+      // neck / body
+      neckTop: [225, 400],
+      neckMid: [195, 450],
+      neckBase: [240, 480],
+      chest: [220, 540],
+      shoulder: [270, 570],
+      shoulderFront: [316, 580],
+      shoulderBack: [352, 570],
+      bellyLine: [420, 550],
+      backTop: [550, 430],
+      rump: [610, 500],
+      hipLower: [550, 560],
+      hipFront: [516, 560],
+      hipBack: [590, 544],
+
+      // head
+      leftEarTip: [48, 332],
+      leftEarBase: [112, 360],
+      leftEarLow: [85, 398],
+      rightEarTip: [255, 348],
+      rightEarBase: [182, 375],
+      rightEarLow: [210, 407],
+      leftHornBaseA: [112, 360],
+      leftHornBaseB: [137, 364],
+      leftHornKnee: [92, 258],
+      leftHornTip: [112, 170],
+      leftHornInner: [112, 258],
+
+      rightHornBaseA: [170, 374],
+      rightHornBaseB: [198, 382],
+      rightHornKnee: [232, 258],
+      rightHornTip: [205, 170],
+      rightHornInner: [214, 258],
+
+      headFront: [112, 360],
+      headCenter: [170, 374],
+      noseTip: [60, 420],
+      jawBottom: [76, 444],
+      headBack: [222, 398],
+      jawAngle: [190, 450],
+
+      // front legs
+      frontNearKnee: [304, 688],
+      frontNearHoof: [232, 824],
+      frontFarKneeA: [331, 688],
+      frontFarKneeB: [314, 688],
+      frontFarHoof: [348, 824],
+
+      // back legs
+      backNearKneeA: [575, 668],
+      backNearKneeB: [560, 682],
+      backNearHoof: [490, 824],
+
+      backFarKneeA: [610, 670],
+      backFarKneeB: [596, 684],
+      backFarHoof: [626, 824],
+
+      tailBaseTop: [600, 506],
+      tailBaseLow: [580, 536],
+      tailTip: [636, 522]
+    };
+  }
+
+  return platformDeerBasePtsCache;
+}
+
+function platformCloneDeerBasePts() {
+  let src = platformGetDeerBasePts();
+  let out = {};
+
+  for (let key in src) {
+    let pt = src[key];
+    out[key] = [pt[0], pt[1]];
+  }
+
+  return out;
+}
+
 function drawDeerPieceTri(hexColor, p1, p2, p3, index, t) {
   push();
   applyDeerPieceTransform(index, t);
@@ -12484,6 +12414,61 @@ const PELOBATES_FIRST_JUMP_DELAY = 0;
 
 function pelobatesMovePoint(p, dx, dy) {
   return [p[0] + dx, p[1] + dy];
+}
+
+let platformPelobatesBasePtsCache = null;
+
+function platformGetPelobatesBasePts() {
+  if (!platformPelobatesBasePtsCache) {
+    platformPelobatesBasePtsCache = {
+      noseTip: [92, 438],
+      snoutTop: [140, 370],
+      snoutLow: [152, 505],
+      headTop: [235, 322],
+      headMid: [282, 405],
+      headLow: [286, 548],
+      shoulderTop: [388, 350],
+      backTopA: [550, 342],
+      backTopB: [710, 398],
+      rumpTop: [820, 505],
+      rumpMid: [855, 600],
+      rumpLow: [805, 680],
+      bellyRear: [620, 728],
+      bellyMid: [455, 732],
+      bellyFront: [305, 662],
+      frontKneeA: [248, 620],
+      frontToeA: [180, 705],
+      frontToeB: [270, 708],
+      midKnee: [405, 686],
+      midToeA: [330, 758],
+      midToeB: [500, 762],
+      backHip: [670, 612],
+      backThigh: [730, 642],
+      backKnee: [780, 710],
+      backAnkle: [745, 758],
+      backToeA: [650, 782],
+      backToeB: [815, 775],
+      c1: [430, 425],
+      c2: [590, 455],
+      c3: [688, 555],
+      c4: [558, 632],
+      c5: [420, 620]
+    };
+  }
+
+  return platformPelobatesBasePtsCache;
+}
+
+function platformClonePelobatesBasePts() {
+  let src = platformGetPelobatesBasePts();
+  let out = {};
+
+  for (let key in src) {
+    let pt = src[key];
+    out[key] = [pt[0], pt[1]];
+  }
+
+  return out;
 }
 
 function getPelobatesLoosePieceTarget(index) {
@@ -12655,40 +12640,9 @@ function drawPelobatesAnimal() {
   scale(-animalScale * squashX, animalScale * squashY);
   translate(-500, -500);
 
-  let pts = {
-    noseTip: [92, 438],
-    snoutTop: [140, 370],
-    snoutLow: [152, 505],
-    headTop: [235, 322],
-    headMid: [282, 405],
-    headLow: [286, 548],
-    shoulderTop: [388, 350],
-    backTopA: [550, 342],
-    backTopB: [710, 398],
-    rumpTop: [820, 505],
-    rumpMid: [855, 600],
-    rumpLow: [805, 680],
-    bellyRear: [620, 728],
-    bellyMid: [455, 732],
-    bellyFront: [305, 662],
-    frontKneeA: [248, 620],
-    frontToeA: [180, 705],
-    frontToeB: [270, 708],
-    midKnee: [405, 686],
-    midToeA: [330, 758],
-    midToeB: [500, 762],
-    backHip: [670, 612],
-    backThigh: [730, 642],
-    backKnee: [780, 710],
-    backAnkle: [745, 758],
-    backToeA: [650, 782],
-    backToeB: [815, 775],
-    c1: [430, 425],
-    c2: [590, 455],
-    c3: [688, 555],
-    c4: [558, 632],
-    c5: [420, 620]
-  };
+  let pts = jumpActive
+    ? platformClonePelobatesBasePts()
+    : platformGetPelobatesBasePts();
 
   if (jumpActive) {
     let headMoveX = sin(millis() * 0.0045) * 1.1;
