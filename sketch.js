@@ -18,15 +18,16 @@ let platformSplashPhaseStart = 0;
 let platformSplashPreWhiteMs = 600;
 let platformSplashHoldMs = 620;
 let platformSplashFadeOutMs = 380;
-let platformSplashWhiteBeatMs = 40;
+let platformSplashWhiteBeatMs = 0;
 let platformSplashFadeInMs = 480;
 let platformGameAssetsLoadStarted = false;
+let platformLineArtProcessed = false;
 let platformIntroTransitionActive = false;
 let platformIntroTransitionIndex = -1;
 let platformIntroTransitionStart = 0;
 let platformIntroTransitionDuration = 400;
 let platformIntroTransitionSnapshot = null;
-let platformIntroTransitionSoundLeadMs = 70;
+let platformIntroTransitionSoundLeadMs = 15;
 
 let platformPosterFadeStartTime = null;
 let platformPosterFadeDuration = 320;
@@ -141,7 +142,7 @@ let platformAudioActiveSources = [];
 let platformAudioGestureBound = false;
 let platformIgnoreNextMousePress = false;
 const PLATFORM_AUDIO_MASTER_GAIN = 0.42;
-const PLATFORM_SFX_SAMPLE_V = 22;
+const PLATFORM_SFX_SAMPLE_V = 23;
 const PLATFORM_SFX_SAMPLE_URLS = {
   wrong: `sfx/fail.mp3?v=${PLATFORM_SFX_SAMPLE_V}`,
   correct: `sfx/correct.wav?v=${PLATFORM_SFX_SAMPLE_V}`,
@@ -1301,7 +1302,37 @@ function platformWarmUiPluckHtml() {
 }
 
 function platformPlaySelectHtml() {
-  return platformPlayHtmlSample("select", 0.7);
+  // Hot path: reuse the primed element. cloneNode() re-buffers and makes the
+  // first triangle tap feel late relative to the zoom.
+  let el = platformEnsureHtmlSampleEl("select");
+  if (platformAudioMuted || !el) {
+    return false;
+  }
+  platformAudioApplyPlaybackSession();
+  try {
+    el.muted = false;
+    el.volume = 0.7;
+    try {
+      el.pause();
+    } catch (e) {
+      // ignore
+    }
+    try {
+      el.currentTime = 0;
+    } catch (e) {
+      // ignore
+    }
+    let playResult = el.play();
+    if (playResult && typeof playResult.catch === "function") {
+      playResult.catch(() => {
+        platformPlayHtmlEl(el, 0.7);
+      });
+    }
+    platformAudioUnlocked = true;
+    return true;
+  } catch (e) {
+    return platformPlayHtmlEl(el, 0.7);
+  }
 }
 
 function platformPreloadAllHtmlSamples() {
@@ -1903,10 +1934,12 @@ function mousePressed() {
     platformIgnoreNextMousePress = false;
     return;
   }
-  if (platformMode === "intro" || platformMode === "splash") {
-    if (platformMode === "intro") {
-      platformHandleIntroPress(mouseX, mouseY);
-    }
+  if (platformMode === "intro" || platformCanAcceptIntroPressFromSplash()) {
+    platformFinishSplashForIntroIfNeeded();
+    platformHandleIntroPress(mouseX, mouseY);
+    return;
+  }
+  if (platformMode === "splash") {
     return;
   }
   platformAudioUnlockSync();
@@ -1940,8 +1973,6 @@ function mousePressed() {
 }
 
 function touchStarted() {
-  // Always ignore the synthetic mouse click iOS fires after a touch.
-  platformIgnoreNextMousePress = true;
   // Prefer real touch coords — mouseX/Y can lag on the first tap.
   let x = mouseX;
   let y = mouseY;
@@ -1949,13 +1980,24 @@ function touchStarted() {
     x = touches[0].x;
     y = touches[0].y;
   }
-  if (platformMode === "intro" || platformMode === "splash") {
-    if (platformMode === "intro") {
-      // No Web Audio unlock here — it hitchs the zoom. HTML select is enough.
-      platformHandleIntroPress(x, y);
-    }
+
+  // Menu is visible during splash fade-in; accept that tap and finish splash.
+  if (platformMode === "intro" || platformCanAcceptIntroPressFromSplash()) {
+    // Always ignore the synthetic mouse click iOS fires after a touch.
+    platformIgnoreNextMousePress = true;
+    platformFinishSplashForIntroIfNeeded();
+    // No Web Audio unlock here — it hitchs the zoom. HTML select is enough.
+    platformHandleIntroPress(x, y);
     return false;
   }
+
+  if (platformMode === "splash") {
+    // Don't set ignore-next-mouse: this touch did not select anything, and
+    // blocking the follow-up mouse click ate the first real triangle tap.
+    return false;
+  }
+
+  platformIgnoreNextMousePress = true;
 
   platformAudioUnlockSync();
   platformAudioUnlock();
@@ -3944,6 +3986,10 @@ function platformThickenLineArtImage(img, radius = 1) {
 }
 
 function platformProcessLineArtImages() {
+  if (platformLineArtProcessed) {
+    return;
+  }
+  platformLineArtProcessed = true;
   platformFinalHomeIcon = platformRecolorLineArtImage(
     platformFinalHomeIcon,
     PLATFORM_TEXT_RGB,
@@ -4541,6 +4587,8 @@ function platformDrawSplash() {
 
   if (platformSplashPhase === "hold") {
     platformDrawMainBackground();
+    // Warm line-art here so the white cut between fades isn't blocked by it.
+    platformProcessLineArtImages();
     if (millis() - platformSplashPhaseStart >= platformSplashHoldMs) {
       platformBeginSplashFadeOut();
     }
@@ -4601,6 +4649,22 @@ function platformAdoptOrStartSplash() {
   platformSplashStarted = true;
   platformSplashPhase = "preWhite";
   platformSplashPhaseStart = millis();
+}
+
+function platformCanAcceptIntroPressFromSplash() {
+  return (
+    platformMode === "splash" &&
+    (platformSplashPhase === "fadeIn" || platformSplashPhase === "done")
+  );
+}
+
+function platformFinishSplashForIntroIfNeeded() {
+  if (platformMode !== "splash") {
+    return;
+  }
+  platformSplashPhase = "done";
+  platformMode = "intro";
+  platformTeardownSplashOverlay(true);
 }
 
 function platformTeardownSplashOverlay(forceRemove) {
@@ -5590,7 +5654,7 @@ const platformLooseTargetCache = {};
 const platformLooseGroupBBoxCache = {};
 const platformPelobatesTargetCache = {};
 let platformLooseRepelFrameCache = null;
-const platformLooseLayoutVersion = 96;
+const platformLooseLayoutVersion = 97;
 const PLATFORM_LOOSE_ROT_PAD = 24;
 const PLATFORM_LOOSE_STROKE_PAD = 3;
 
@@ -9929,7 +9993,7 @@ const posterRegistry = {
       x: [-280, 280],
       y: [-280, 280],
       speed: [0.004, 0.01],
-      wobble: false,
+      wobble: true,
       rot: [-0.45, 0.45]
     },
     tGroupLerp: 0.035,
@@ -9951,8 +10015,8 @@ const posterRegistry = {
       scatter: { x: 0, y: 0 },
       hyenaStyleRepel: true,
       assembleClearance: ms(20),
-      // Slot layout (not circular) keeps loose triangles on-canvas; ceiling is enforced
-      // in eagleAssignScatterSlots via platformGetEagleScatterCeilingScreenY.
+      // Same circular scatter as turtle/deer/toad; eagle ceiling still
+      // enforced in platformLooseCircularAdjustLooseTargets.
       drawTransform: {
         originX: ANIMAL_REF_W / 2 - 42,
         originY: PLATFORM_EAGLE_FINAL_ORIGIN_Y,
@@ -9961,19 +10025,37 @@ const posterRegistry = {
         pivotY: 500
       },
       composition: {
-        left: mx(28),
-        right: platformW - mx(28),
-        top: my(100),
-        bottom: null,
+        left: mx(20),
+        right: platformW - mx(20),
+        top: my(96),
+        bottom: my(698),
         pad: ms(4),
-        edgePad: ms(10)
+        edgePad: ms(16)
       },
       layout: {
         type: "zone",
-        zoneMode: "slots",
+        zoneMode: "circular",
+        centerU: 0.5,
+        centerV: 0.44,
+        coreCount: 8,
+        coreInner: 0.02,
+        coreOuter: 0.16,
+        corePow: 0.5,
+        outerInner: 0.07,
+        outerOuter: 0.38,
+        outerPow: 0.44,
+        radiusScaleX: 1.08,
+        radiusScaleY: 1.42,
+        uMin: 0.06,
+        uMax: 0.94,
+        vMin: 0.08,
+        vMax: 0.84,
+        screenShift: { x: 0, y: 0 },
         placement: "bbox"
       },
       floatAmp: 5,
+      homeMaxDisp: ms(22),
+      looseRepelFollow: 0.22,
       pieceGeo: PLATFORM_EAGLE_PIECE_GEO
     },
     choiceStages: [
