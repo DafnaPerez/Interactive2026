@@ -11,8 +11,6 @@ let platformSelectedStarted = false;
 let platformSessionAnimalId = null;
 let platformIntroHover = -1;
 let platformCanvasReady = false;
-let platformSplashEl = null;
-let platformSplashWhiteCanvas = null;
 let platformSplashStarted = false;
 let platformSplashPhase = "idle"; // idle | preWhite | play | hold | fadeOut | whiteBeat | fadeIn | done
 let platformSplashPhaseStart = 0;
@@ -21,6 +19,10 @@ let platformSplashHoldMs = 620;
 let platformSplashFadeOutMs = 380;
 let platformSplashWhiteBeatMs = 0;
 let platformSplashFadeInMs = 480;
+let platformSplashAnimStart = 0;
+let platformSplashSettleAt = 0;
+let platformSplashLogoAlpha = 1;
+let platformSplashPieces = null;
 let platformGameAssetsLoadStarted = false;
 let platformLineArtProcessed = false;
 let platformIntroTransitionActive = false;
@@ -1080,8 +1082,7 @@ function platformApplyStartupQuery() {
 }
 
 function platformSkipSplashToAnimal(animal) {
-  platformTeardownSplashOverlay(true);
-  platformTeardownSplashWhiteCanvas();
+  platformTeardownSplash();
   platformSplashPhase = "done";
   platformMode = animal;
   platformSelectedStarted = false;
@@ -4540,78 +4541,301 @@ function platformDrawMainBackground() {
 }
 
 // --- Opening splash ---
-// Starts in setup (not before p5). Game assets load in parallel during the animation.
+// Drawn entirely on the p5 canvas (no DOM/CSS logo) so Android dark mode
+// and viewport quirks cannot recolor or shrink it.
 
-const PLATFORM_LOGO_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 297.81 318.5" width="100%" height="100%" ' +
-  'style="display:block;overflow:visible;forced-color-adjust:none;-webkit-forced-color-adjust:none">' +
-  // Inline fills (not CSS classes) so Android auto-dark cannot remint the colors.
-  "<g>" +
-  '<polygon fill="#7F905F" fill-opacity="1" points="123.99 168.29 8.59 119.63 155.49 3.67 123.99 168.29"/>' +
-  '<polygon fill="#71553F" fill-opacity="1" points="148.89 185.94 66.03 277.02 6.19 125.58 148.89 185.94"/>' +
-  '<polygon fill="#525D46" fill-opacity="1" points="273.03 143.56 130.29 169.63 149.14 71.44 273.03 143.56"/>' +
-  '<polygon fill="#C79961" fill-opacity="1" points="247.1 220.98 139.27 314.53 156.7 189.14 247.1 220.98"/>' +
-  '<polygon fill="#8F5B2E" fill-opacity="1" points="132.72 313.93 70.53 282.29 148.63 196.25 132.72 313.93"/>' +
-  "</g><g>" +
-  '<path fill="#4E463D" fill-opacity="1" d="M167.06,47.09c1.16-1.96,2.27-3.21,2.94-4.35.35-.59.69-1.07.76-1.71,2.77-4.7,3.11-4.75-.74-7.39-.81-.91-.97-1.68-.49-2.5.61-.93,1.44-1.18,2.3-.67.14.08.27.16.43.31.29.23.58.47.9.66,1.96,1.16,3.41.9,4.86-2.3.22-.48.7-1.19,1.37-1.59.64-.36,1.65-.19,2.47.29.18.11.37.22.47.34.59.47.33.69.13,1.55-.11.49-.3.93-.37,1.26-.13.54-.58.89-.85,1.34-.59,1-.95,2.02-.05,3.42.58.9,1.5,1.32,2.37,1.83,1.05.62,2.82,1.48,3.77,2.16.3.12.58.28.8.41,1,.59,1.41,1.26.71,2.45-1,1.69-2.17,1.18-3.48.47-1.81-1.31-4.05-2.21-5.05-2.8-2.65-1.56-3.26-.63-5.61,3.15l-2.44,4.03c-2.79,4.94-4.38,7.63-.82,9.73.82.48,1.81.89,3.16,1.31.46.15,2.12.27,2.85.7.88.58.85.75.12,1.98-.19.32-1,1.69-2.27,1.55-3.01-.73-5.23-1.67-6.87-2.64-5.34-3.15-4.58-7.56-1.37-12.99Z"/>' +
-  '<path fill="#4E463D" fill-opacity="1" d="M181.05,67.04c-.81-.6-1.01-1.52-.43-2.29.42-.61,1.22-.82,1.81-.47,3.65,2.15,5.3-.13,6.5-2.68,1.08-2.25,2.47-4.7,3.91-6.61,1.94-2.55,3.86-5.29.07-8.14-.72-.55-.86-1.67-.26-2.37.52-.68,1.5-.77,2.44-.28l3.08,1.76c3.74,2.21-.56,5.33,10.66,6.11,1.2.16,3.02,1.04,2.13,3.17-.79,1.87-2.1,2.2-4.07,1.16-1.08-.57-2.21-1.37-3.38-1.68-2.96-.83-4.57-1.22-6.72,2.31-1.61,2.62-3.3,5.49-4.94,8.16-1.34,2.16-.91,3.83,1.1,5.02,1,.59,3.12,1.9,3.79,2.54.61.42.69,1.02.28,1.82-.46.78-1.15,1.11-1.77.8-4.52-2.24-6.76-3.13-7.5-4.18-2.13-1.38-4.58-2.77-6.72-4.15Z"/>' +
-  '<path fill="#4E463D" fill-opacity="1" d="M204.11,79.68c-1.3-2.18-.94-5.17.27-7.22,1.37-2.33,3.92-3.83,6.71-3.85,3.33,0,6.13,1.59,8.87,3.21,1.19.7,2.62,1.61,4.37-1.36,1.05-1.78.74-3.75-.71-5.46-.5-.61-1.18-1.13-2.28-1.78l-2.33-1.37c-.66-.45-1.65-.54-2.38-.97-.87-.51-.95-1.3-.41-2.33,1.13-2.22,2.73-.35,4.45.29.81.29,1.52.65,2.3,1.11.5.3.93.61,1.43.91,5.66,3.34,6.64,6.57,3.72,12.35-.39.76-1.61,2.93-2.5,4.43-.7,1.19-3.19,5.19-4.02,6.61l-1.05,1.78c-1.67,2.83-2.13,3.29-3.16,2.75-1.3-.71-.55-1.99-1.83-2.74-1.32-.78-3.16.04-5.94-1.6-.5-.3-1.08-.46-1.59-.75-1.06-.81-2.52-1.67-3.93-3.98ZM218.58,80.71c2.53-4.29,2.59-4.07-1.47-6.47-3.83-2.26-6.93-2.43-8.68.53-1.43,2.42-.96,4.23,2.78,6.44,2.42,1.43,6.57.86,7.37-.51Z"/>' +
-  '<path fill="#4E463D" fill-opacity="1" d="M226.95,89.35c-.34-2.97,1.05-5.53,2.77-8.64,1.06-1.9,2.24-3.9,4.16-5.48,4.31-3.55,9.38-3.07,14.08-.3,1.5.89,4.07,2.9,4.95,4.22.72.98.2,1.23-.39,2.23-.54.91-1.2,1.82-2.24.77-.16-.15-.36-.21-.57-.4-.52-.37-.71-1.09-1.23-1.46-.47-.34-1.33-1.09-2.69-1.9-4.43-2.61-8.36-1.68-11.22,3.16-.73,1.23-1.65,2.47-1.97,3.45-.46.78-.81,1.68-.58,2.86-1.1,1.87-.04,6.01,5.87,8.51.61.42,2.79.79,3.62,1.27.91.54,1.34.54.4,2.14-.11.18-.14.35-.22.48-.92,1.55-2.03,1.14-3.53.56-.65-.26-1.11-.72-1.68-.81-1.11-.41-2.12-.88-3.04-1.42-3.74-2.21-5.97-4.57-6.48-9.24Z"/>' +
-  '<path fill="#4E463D" fill-opacity="1" d="M247.97,100.03c.16-2.25,1.03-4.56,2.57-7.16,2.72-4.61,4.98-6.35,8.03-7.56,2.98-1.19,6.28-.42,9.2,1.31,1.28.75,2.42,1.74,3.26,3.03,1.93,2.99,3.06,6.79-.33,12.54-.19.32-.35.59-.56.84-1.04,1.23-2.17,1.18-3.77.24-3.01-1.78-5.91-3.74-9.12-5.39-1.92-1.13-2.54-2.36-4.08.24-.38.64-.56,1.58-.56,2.93-.02,3.37,1.83,5.02,3.98,6.29.68.4,1.42.72,2.06,1.09.16.15.33.38.61.42,1.41.22,2.29.49,2.93.87.87.51.95.99.55,1.99-1.03,2.47-3.37.91-5.9.21-.83-.37-2.1-.93-2.73-1.31-4.47-2.64-6.47-6.03-6.12-10.57ZM264.7,97.74c1.32.78,2.45.65,3.04-.36.27-.46.53-1.1.55-1.77.09-2.65-.79-4.59-3.36-5.98-3.55-1.91-7.04.15-8.5,2.61-.63.86,2.73,2.35,4.24,3.24,1.32.78,2.75,1.5,4.02,2.25Z"/>' +
-  '<path fill="#4E463D" fill-opacity="1" d="M267.83,117.24c-.81-.72-.51-1.53.03-2.45.22-.36.52-.68.88-.96.58-.46.57-.65,1.21-.27.32.19.8.41,1.18.82,1.61,1.75,3.21,3.43,5.12,4.56.64.38,1.38.69,2.07.98,1.39.45,2.78,1.03,4.04-.38.11-.18.53-.49.8-.94.4-.68.58-1.81-.89-3.6-.84-1.17-1.7-2.23-2.48-3.31-.83-1.1-1.81-2.24-2.54-3.41-1.6-2.61-2.27-5.22-.6-8.05,2.05-3.47,6.29-4.41,9.73-2.31l3.51,1.76c1.44,1.1,2.85,2.05,4.24,3.24.99.83,1.17,1.67.71,2.45-.08.14-.21.25-.32.43-.48.82-.85,1.65-1.72,1.14-.18-.11-1.15-.56-1.4-.76-1.18-1.13-2.34-2.49-3.67-3.27-.41-.24-.84-.56-1.25-.8-1.6-.94-3.47-1.62-5.18.02-.28.27-.27.46-.43.73-1.27,2.14.76,4.02,2.12,5.68,1.01,1.21,1.92,2.48,2.87,3.79,1.15,1.6,1.96,3.25,2.13,4.83.22,1.61-.23,3-.99,4.28-1.21,2.05-3.46,3.37-6.18,3.18-2.53-.2-4.59-.99-6.59-2.17-2.33-1.37-4.41-3.16-6.4-5.2Z"/>' +
-  "</g></svg>";
+const PLATFORM_SPLASH_LOGO_VB_W = 297.81;
+const PLATFORM_SPLASH_LOGO_VB_H = 318.5;
 
-function platformLockSplashLogoColors(svg) {
-  if (!svg) {
+// Triangles: points in logo viewBox space + bounce start offsets.
+const PLATFORM_SPLASH_POLYS = [
+  {
+    fill: '#7F905F',
+    points: [[123.99, 168.29], [8.59, 119.63], [155.49, 3.67]],
+    dx: -70, dy: -110, rot: -28, delay: 0, dur: 1080
+  },
+  {
+    fill: '#71553F',
+    points: [[148.89, 185.94], [66.03, 277.02], [6.19, 125.58]],
+    dx: 55, dy: -95, rot: 22, delay: 90, dur: 1080
+  },
+  {
+    fill: '#525D46',
+    points: [[273.03, 143.56], [130.29, 169.63], [149.14, 71.44]],
+    dx: 95, dy: 20, rot: 34, delay: 180, dur: 1080
+  },
+  {
+    fill: '#C79961',
+    points: [[247.1, 220.98], [139.27, 314.53], [156.7, 189.14]],
+    dx: 40, dy: 105, rot: -18, delay: 270, dur: 1080
+  },
+  {
+    fill: '#8F5B2E',
+    points: [[132.72, 313.93], [70.53, 282.29], [148.63, 196.25]],
+    dx: -85, dy: 70, rot: 26, delay: 360, dur: 1080
+  }
+];
+
+// Hebrew wordmark paths (viewBox space). Centers are approximate glyph pivots.
+const PLATFORM_SPLASH_PATHS = [
+  { fill: '#4E463D', cx: 185, cy: 55, d: 'M167.06,47.09c1.16-1.96,2.27-3.21,2.94-4.35.35-.59.69-1.07.76-1.71,2.77-4.7,3.11-4.75-.74-7.39-.81-.91-.97-1.68-.49-2.5.61-.93,1.44-1.18,2.3-.67.14.08.27.16.43.31.29.23.58.47.9.66,1.96,1.16,3.41.9,4.86-2.3.22-.48.7-1.19,1.37-1.59.64-.36,1.65-.19,2.47.29.18.11.37.22.47.34.59.47.33.69.13,1.55-.11.49-.3.93-.37,1.26-.13.54-.58.89-.85,1.34-.59,1-.95,2.02-.05,3.42.58.9,1.5,1.32,2.37,1.83,1.05.62,2.82,1.48,3.77,2.16.3.12.58.28.8.41,1,.59,1.41,1.26.71,2.45-1,1.69-2.17,1.18-3.48.47-1.81-1.31-4.05-2.21-5.05-2.8-2.65-1.56-3.26-.63-5.61,3.15l-2.44,4.03c-2.79,4.94-4.38,7.63-.82,9.73.82.48,1.81.89,3.16,1.31.46.15,2.12.27,2.85.7.88.58.85.75.12,1.98-.19.32-1,1.69-2.27,1.55-3.01-.73-5.23-1.67-6.87-2.64-5.34-3.15-4.58-7.56-1.37-12.99Z' },
+  { fill: '#4E463D', cx: 200, cy: 62, d: 'M181.05,67.04c-.81-.6-1.01-1.52-.43-2.29.42-.61,1.22-.82,1.81-.47,3.65,2.15,5.3-.13,6.5-2.68,1.08-2.25,2.47-4.7,3.91-6.61,1.94-2.55,3.86-5.29.07-8.14-.72-.55-.86-1.67-.26-2.37.52-.68,1.5-.77,2.44-.28l3.08,1.76c3.74,2.21-.56,5.33,10.66,6.11,1.2.16,3.02,1.04,2.13,3.17-.79,1.87-2.1,2.2-4.07,1.16-1.08-.57-2.21-1.37-3.38-1.68-2.96-.83-4.57-1.22-6.72,2.31-1.61,2.62-3.3,5.49-4.94,8.16-1.34,2.16-.91,3.83,1.1,5.02,1,.59,3.12,1.9,3.79,2.54.61.42.69,1.02.28,1.82-.46.78-1.15,1.11-1.77.8-4.52-2.24-6.76-3.13-7.5-4.18-2.13-1.38-4.58-2.77-6.72-4.15Z' },
+  { fill: '#4E463D', cx: 215, cy: 78, d: 'M204.11,79.68c-1.3-2.18-.94-5.17.27-7.22,1.37-2.33,3.92-3.83,6.71-3.85,3.33,0,6.13,1.59,8.87,3.21,1.19.7,2.62,1.61,4.37-1.36,1.05-1.78.74-3.75-.71-5.46-.5-.61-1.18-1.13-2.28-1.78l-2.33-1.37c-.66-.45-1.65-.54-2.38-.97-.87-.51-.95-1.3-.41-2.33,1.13-2.22,2.73-.35,4.45.29.81.29,1.52.65,2.3,1.11.5.3.93.61,1.43.91,5.66,3.34,6.64,6.57,3.72,12.35-.39.76-1.61,2.93-2.5,4.43-.7,1.19-3.19,5.19-4.02,6.61l-1.05,1.78c-1.67,2.83-2.13,3.29-3.16,2.75-1.3-.71-.55-1.99-1.83-2.74-1.32-.78-3.16.04-5.94-1.6-.5-.3-1.08-.46-1.59-.75-1.06-.81-2.52-1.67-3.93-3.98ZM218.58,80.71c2.53-4.29,2.59-4.07-1.47-6.47-3.83-2.26-6.93-2.43-8.68.53-1.43,2.42-.96,4.23,2.78,6.44,2.42,1.43,6.57.86,7.37-.51Z' },
+  { fill: '#4E463D', cx: 240, cy: 90, d: 'M226.95,89.35c-.34-2.97,1.05-5.53,2.77-8.64,1.06-1.9,2.24-3.9,4.16-5.48,4.31-3.55,9.38-3.07,14.08-.3,1.5.89,4.07,2.9,4.95,4.22.72.98.2,1.23-.39,2.23-.54.91-1.2,1.82-2.24.77-.16-.15-.36-.21-.57-.4-.52-.37-.71-1.09-1.23-1.46-.47-.34-1.33-1.09-2.69-1.9-4.43-2.61-8.36-1.68-11.22,3.16-.73,1.23-1.65,2.47-1.97,3.45-.46.78-.81,1.68-.58,2.86-1.1,1.87-.04,6.01,5.87,8.51.61.42,2.79.79,3.62,1.27.91.54,1.34.54.4,2.14-.11.18-.14.35-.22.48-.92,1.55-2.03,1.14-3.53.56-.65-.26-1.11-.72-1.68-.81-1.11-.41-2.12-.88-3.04-1.42-3.74-2.21-5.97-4.57-6.48-9.24Z' },
+  { fill: '#4E463D', cx: 258, cy: 100, d: 'M247.97,100.03c.16-2.25,1.03-4.56,2.57-7.16,2.72-4.61,4.98-6.35,8.03-7.56,2.98-1.19,6.28-.42,9.2,1.31,1.28.75,2.42,1.74,3.26,3.03,1.93,2.99,3.06,6.79-.33,12.54-.19.32-.35.59-.56.84-1.04,1.23-2.17,1.18-3.77.24-3.01-1.78-5.91-3.74-9.12-5.39-1.92-1.13-2.54-2.36-4.08.24-.38.64-.56,1.58-.56,2.93-.02,3.37,1.83,5.02,3.98,6.29.68.4,1.42.72,2.06,1.09.16.15.33.38.61.42,1.41.22,2.29.49,2.93.87.87.51.95.99.55,1.99-1.03,2.47-3.37.91-5.9.21-.83-.37-2.1-.93-2.73-1.31-4.47-2.64-6.47-6.03-6.12-10.57ZM264.7,97.74c1.32.78,2.45.65,3.04-.36.27-.46.53-1.1.55-1.77.09-2.65-.79-4.59-3.36-5.98-3.55-1.91-7.04.15-8.5,2.61-.63.86,2.73,2.35,4.24,3.24,1.32.78,2.75,1.5,4.02,2.25Z' },
+  { fill: '#4E463D', cx: 278, cy: 115, d: 'M267.83,117.24c-.81-.72-.51-1.53.03-2.45.22-.36.52-.68.88-.96.58-.46.57-.65,1.21-.27.32.19.8.41,1.18.82,1.61,1.75,3.21,3.43,5.12,4.56.64.38,1.38.69,2.07.98,1.39.45,2.78,1.03,4.04-.38.11-.18.53-.49.8-.94.4-.68.58-1.81-.89-3.6-.84-1.17-1.7-2.23-2.48-3.31-.83-1.1-1.81-2.24-2.54-3.41-1.6-2.61-2.27-5.22-.6-8.05,2.05-3.47,6.29-4.41,9.73-2.31l3.51,1.76c1.44,1.1,2.85,2.05,4.24,3.24.99.83,1.17,1.67.71,2.45-.08.14-.21.25-.32.43-.48.82-.85,1.65-1.72,1.14-.18-.11-1.15-.56-1.4-.76-1.18-1.13-2.34-2.49-3.67-3.27-.41-.24-.84-.56-1.25-.8-1.6-.94-3.47-1.62-5.18.02-.28.27-.27.46-.43.73-1.27,2.14.76,4.02,2.12,5.68,1.01,1.21,1.92,2.48,2.87,3.79,1.15,1.6,1.96,3.25,2.13,4.83.22,1.61-.23,3-.99,4.28-1.21,2.05-3.46,3.37-6.18,3.18-2.53-.2-4.59-.99-6.59-2.17-2.33-1.37-4.41-3.16-6.4-5.2Z' }
+];
+
+function platformSplashPolyCentroid(points) {
+  let x = 0;
+  let y = 0;
+  for (let i = 0; i < points.length; i++) {
+    x += points[i][0];
+    y += points[i][1];
+  }
+  return { x: x / points.length, y: y / points.length };
+}
+
+function platformSplashSpringEase(t) {
+  // Approx. cubic-bezier(0.22, 1.55, 0.36, 1) — overshoot settle like the old WAAPI bounce.
+  t = constrain(t, 0, 1);
+  let c1 = 1.70158;
+  let c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+
+function platformSplashKeyframeLerp(frames, t) {
+  if (t <= 0) {
+    return frames[0];
+  }
+  if (t >= 1) {
+    return frames[frames.length - 1];
+  }
+  for (let i = 0; i < frames.length - 1; i++) {
+    let a = frames[i];
+    let b = frames[i + 1];
+    if (t >= a.t && t <= b.t) {
+      let u = (t - a.t) / Math.max(0.0001, b.t - a.t);
+      return {
+        opacity: lerp(a.opacity, b.opacity, u),
+        x: lerp(a.x, b.x, u),
+        y: lerp(a.y, b.y, u),
+        rot: lerp(a.rot, b.rot, u),
+        scale: lerp(a.scale, b.scale, u)
+      };
+    }
+  }
+  return frames[frames.length - 1];
+}
+
+function platformBuildSplashPieces() {
+  let pieces = [];
+  PLATFORM_SPLASH_POLYS.forEach((poly) => {
+    let c = platformSplashPolyCentroid(poly.points);
+    pieces.push({
+      kind: 'poly',
+      fill: poly.fill,
+      points: poly.points,
+      cx: c.x,
+      cy: c.y,
+      delay: poly.delay,
+      dur: poly.dur,
+      frames: [
+        { t: 0, opacity: 0, x: poly.dx, y: poly.dy, rot: poly.rot, scale: 0.35 },
+        {
+          t: 0.58,
+          opacity: 1,
+          x: poly.dx * 0.08,
+          y: 14,
+          rot: poly.rot * 0.15,
+          scale: 1.16
+        },
+        {
+          t: 0.78,
+          opacity: 1,
+          x: 0,
+          y: -7,
+          rot: -poly.rot * 0.08,
+          scale: 0.94
+        },
+        { t: 1, opacity: 1, x: 0, y: 0, rot: 0, scale: 1 }
+      ]
+    });
+  });
+
+  let markEnd = 0;
+  PLATFORM_SPLASH_POLYS.forEach((poly) => {
+    markEnd = Math.max(markEnd, poly.delay + poly.dur);
+  });
+  let wordDelay = Math.max(160, markEnd - 920);
+
+  PLATFORM_SPLASH_PATHS.forEach((path, i) => {
+    pieces.push({
+      kind: 'path',
+      fill: path.fill,
+      d: path.d,
+      cx: path.cx,
+      cy: path.cy,
+      delay: wordDelay + i * 48,
+      dur: 720,
+      path2d: null,
+      frames: [
+        { t: 0, opacity: 0, x: 0, y: 14, rot: -6, scale: 0.7 },
+        { t: 0.7, opacity: 1, x: 0, y: -3, rot: 1, scale: 1.06 },
+        { t: 1, opacity: 1, x: 0, y: 0, rot: 0, scale: 1 }
+      ]
+    });
+  });
+
+  return pieces;
+}
+
+function platformEnsureSplashPieces() {
+  if (platformSplashPieces) {
+    return platformSplashPieces;
+  }
+  platformSplashPieces = platformBuildSplashPieces();
+  if (typeof Path2D !== 'undefined') {
+    platformSplashPieces.forEach((piece) => {
+      if (piece.kind === 'path') {
+        try {
+          piece.path2d = new Path2D(piece.d);
+        } catch (e) {
+          piece.path2d = null;
+        }
+      }
+    });
+  }
+  return platformSplashPieces;
+}
+
+function platformSplashLogoLayout() {
+  // Same visual size as original min(58vw, 240px) in canvas units.
+  let logoW = Math.min(platformW * 0.58, 240);
+  let scale = logoW / PLATFORM_SPLASH_LOGO_VB_W;
+  return {
+    scale,
+    ox: platformW / 2 - (PLATFORM_SPLASH_LOGO_VB_W * scale) / 2,
+    // Sit a bit above true center — felt low after moving splash onto canvas.
+    oy: platformH / 2 - (PLATFORM_SPLASH_LOGO_VB_H * scale) / 2 - 56
+  };
+}
+
+function platformSampleSplashPiece(piece, elapsedMs) {
+  let local = (elapsedMs - piece.delay) / piece.dur;
+  if (local <= 0) {
+    return piece.frames[0];
+  }
+  if (local >= 1) {
+    return piece.frames[piece.frames.length - 1];
+  }
+  // Ease progress with a mild overshoot, then sample bounce keyframes.
+  // Clamp so we never run past the final rest pose.
+  let eased = constrain(platformSplashSpringEase(local), 0, 1.05);
+  return platformSplashKeyframeLerp(piece.frames, Math.min(1, eased));
+}
+
+function platformDrawSplashLogo(alpha = 1) {
+  if (alpha <= 0.001) {
     return;
   }
-  svg.style.setProperty("forced-color-adjust", "none", "important");
-  svg.style.setProperty("-webkit-forced-color-adjust", "none", "important");
-  Array.from(svg.querySelectorAll("polygon, path")).forEach((el) => {
-    let fill = el.getAttribute("fill");
-    if (fill) {
-      el.style.setProperty("fill", fill, "important");
+  let pieces = platformEnsureSplashPieces();
+  let layout = platformSplashLogoLayout();
+  let elapsed =
+    platformSplashAnimStart > 0 ? millis() - platformSplashAnimStart : 0;
+
+  push();
+  translate(layout.ox, layout.oy);
+  scale(layout.scale);
+  noStroke();
+
+  for (let i = 0; i < pieces.length; i++) {
+    let piece = pieces[i];
+    let pose = platformSampleSplashPiece(piece, elapsed);
+    let a = constrain(pose.opacity * alpha, 0, 1);
+    if (a <= 0.001) {
+      continue;
     }
-    el.style.setProperty("fill-opacity", "1", "important");
-    el.style.setProperty("forced-color-adjust", "none", "important");
-    el.style.setProperty("-webkit-forced-color-adjust", "none", "important");
-  });
+
+    push();
+    translate(piece.cx, piece.cy);
+    translate(pose.x, pose.y);
+    rotate(radians(pose.rot));
+    scale(pose.scale);
+    translate(-piece.cx, -piece.cy);
+
+    let c = color(piece.fill);
+    fill(red(c), green(c), blue(c), a * 255);
+
+    if (piece.kind === 'poly') {
+      beginShape();
+      for (let p = 0; p < piece.points.length; p++) {
+        vertex(piece.points[p][0], piece.points[p][1]);
+      }
+      endShape(CLOSE);
+    } else if (piece.path2d && drawingContext) {
+      drawingContext.save();
+      drawingContext.fillStyle =
+        'rgba(' +
+        red(c) +
+        ',' +
+        green(c) +
+        ',' +
+        blue(c) +
+        ',' +
+        a +
+        ')';
+      drawingContext.fill(piece.path2d);
+      drawingContext.restore();
+    }
+    pop();
+  }
+
+  pop();
+}
+
+function platformSplashSettleMs() {
+  let pieces = platformEnsureSplashPieces();
+  let end = 0;
+  for (let i = 0; i < pieces.length; i++) {
+    end = Math.max(end, pieces[i].delay + pieces[i].dur);
+  }
+  return end;
 }
 
 function platformDrawSplash() {
-  // Full-viewport white canvas underlay (survives Android dark mode).
-  platformEnsureSplashWhiteCanvas();
-
   if (!platformSplashStarted) {
     platformAdoptOrStartSplash();
     platformDrawMainBackground();
     return;
   }
 
-  if (platformSplashPhase === "preWhite") {
+  if (platformSplashPhase === 'preWhite') {
     platformDrawMainBackground();
     if (millis() - platformSplashPhaseStart >= platformSplashPreWhiteMs) {
-      platformSplashPhase = "play";
+      platformSplashPhase = 'play';
       platformSplashPhaseStart = millis();
-      platformEnsureSplashOverlay();
+      platformSplashAnimStart = millis();
+      platformSplashLogoAlpha = 1;
+      platformEnsureSplashPieces();
+      platformSplashSettleAt = millis() + platformSplashSettleMs();
     }
     return;
   }
 
-  if (platformSplashPhase === "play") {
+  if (platformSplashPhase === 'play') {
     platformDrawMainBackground();
-    let settleAt =
-      (platformSplashEl && Number(platformSplashEl.dataset.settleAt)) || 0;
-    if (settleAt && Date.now() >= settleAt) {
-      platformSplashPhase = "hold";
+    platformDrawSplashLogo(platformSplashLogoAlpha);
+    if (millis() >= platformSplashSettleAt) {
+      platformSplashPhase = 'hold';
       platformSplashPhaseStart = millis();
     }
     return;
   }
 
-  if (platformSplashPhase === "hold") {
+  if (platformSplashPhase === 'hold') {
     platformDrawMainBackground();
-    // Warm line-art here so the white cut between fades isn't blocked by it.
+    platformDrawSplashLogo(1);
     platformProcessLineArtImages();
     if (millis() - platformSplashPhaseStart >= platformSplashHoldMs) {
       platformBeginSplashFadeOut();
@@ -4619,7 +4843,7 @@ function platformDrawSplash() {
     return;
   }
 
-  if (platformSplashPhase === "fadeOut") {
+  if (platformSplashPhase === 'fadeOut') {
     platformDrawMainBackground();
     let t = constrain(
       (millis() - platformSplashPhaseStart) / platformSplashFadeOutMs,
@@ -4627,28 +4851,27 @@ function platformDrawSplash() {
       1
     );
     let e = platformEaseInOutSine(t);
-    if (platformSplashEl) {
-      platformSplashEl.style.opacity = String(1 - e);
-    }
+    platformSplashLogoAlpha = 1 - e;
+    platformDrawSplashLogo(platformSplashLogoAlpha);
     if (t >= 1) {
-      platformTeardownSplashOverlay(true);
-      platformSplashPhase = "whiteBeat";
+      platformSplashLogoAlpha = 0;
+      platformSplashPhase = 'whiteBeat';
       platformSplashPhaseStart = millis();
     }
     return;
   }
 
-  if (platformSplashPhase === "whiteBeat") {
+  if (platformSplashPhase === 'whiteBeat') {
     platformDrawMainBackground();
     if (millis() - platformSplashPhaseStart >= platformSplashWhiteBeatMs) {
       platformProcessLineArtImages();
-      platformSplashPhase = "fadeIn";
+      platformSplashPhase = 'fadeIn';
       platformSplashPhaseStart = millis();
     }
     return;
   }
 
-  if (platformSplashPhase === "fadeIn") {
+  if (platformSplashPhase === 'fadeIn') {
     platformDrawIntro();
     let t = constrain(
       (millis() - platformSplashPhaseStart) / platformSplashFadeInMs,
@@ -4660,9 +4883,9 @@ function platformDrawSplash() {
     fill(255, 255, 255, (1 - e) * 255);
     rect(0, 0, platformW, platformH);
     if (t >= 1) {
-      platformSplashPhase = "done";
-      platformMode = "intro";
-      platformTeardownSplashWhiteCanvas();
+      platformSplashPhase = 'done';
+      platformMode = 'intro';
+      platformTeardownSplash();
     }
   }
 }
@@ -4672,377 +4895,40 @@ function platformAdoptOrStartSplash() {
     return;
   }
   platformSplashStarted = true;
-  platformSplashPhase = "preWhite";
+  platformSplashPhase = 'preWhite';
   platformSplashPhaseStart = millis();
-  platformEnsureSplashWhiteCanvas();
+  platformSplashLogoAlpha = 1;
+  platformEnsureSplashPieces();
 }
 
 function platformCanAcceptIntroPressFromSplash() {
   return (
-    platformMode === "splash" &&
-    (platformSplashPhase === "fadeIn" || platformSplashPhase === "done")
+    platformMode === 'splash' &&
+    (platformSplashPhase === 'fadeIn' || platformSplashPhase === 'done')
   );
 }
 
 function platformFinishSplashForIntroIfNeeded() {
-  if (platformMode !== "splash") {
+  if (platformMode !== 'splash') {
     return;
   }
-  platformSplashPhase = "done";
-  platformMode = "intro";
-  platformTeardownSplashOverlay(true);
-  platformTeardownSplashWhiteCanvas();
+  platformSplashPhase = 'done';
+  platformMode = 'intro';
+  platformTeardownSplash();
 }
 
-function platformTeardownSplashWhiteCanvas() {
-  if (!platformSplashWhiteCanvas) {
-    return;
-  }
-  if (platformSplashWhiteCanvas.parentNode) {
-    platformSplashWhiteCanvas.parentNode.removeChild(platformSplashWhiteCanvas);
-  }
-  platformSplashWhiteCanvas = null;
-}
-
-function platformEnsureSplashWhiteCanvas() {
-  if (platformSplashWhiteCanvas || typeof document === "undefined") {
-    return platformSplashWhiteCanvas;
-  }
-
-  // Pixel-filled canvas stretched full viewport. Auto-dark recolors CSS, not
-  // canvas bitmap content — same reason the rest of the app stays light.
-  let c = document.createElement("canvas");
-  c.id = "platform-splash-white-canvas";
-  c.width = 16;
-  c.height = 16;
-  c.setAttribute("aria-hidden", "true");
-  let ctx = c.getContext("2d", { alpha: false });
-  if (ctx) {
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, 16, 16);
-  }
-  c.style.cssText =
-    "position:fixed;left:0;top:0;right:0;bottom:0;width:100%;height:100%;" +
-    "min-height:100dvh;min-height:-webkit-fill-available;z-index:38;" +
-    "display:block;pointer-events:none;border:0;margin:0;padding:0;" +
-    "image-rendering:pixelated;";
-  document.body.appendChild(c);
-  platformSplashWhiteCanvas = c;
-  return c;
-}
-
-function platformTeardownSplashOverlay(forceRemove) {
-  if (!platformSplashEl) {
-    return;
-  }
-  if (forceRemove) {
-    if (platformSplashEl.parentNode) {
-      platformSplashEl.parentNode.removeChild(platformSplashEl);
-    }
-    platformSplashEl = null;
-  }
+function platformTeardownSplash() {
+  platformSplashLogoAlpha = 0;
+  platformSplashAnimStart = 0;
+  platformSplashSettleAt = 0;
 }
 
 function platformBeginSplashFadeOut() {
-  if (platformSplashPhase !== "hold") {
+  if (platformSplashPhase !== 'hold') {
     return;
   }
-  platformSplashPhase = "fadeOut";
+  platformSplashPhase = 'fadeOut';
   platformSplashPhaseStart = millis();
-  if (platformSplashEl) {
-    platformSplashEl.style.transition = "none";
-  }
-}
-
-function platformIsAndroidChrome() {
-  if (typeof navigator === "undefined") {
-    return false;
-  }
-  let ua = navigator.userAgent || "";
-  if (!/Android/i.test(ua)) {
-    return false;
-  }
-  // Samsung Internet only — Google Chrome on Samsung phones should still match.
-  if (/SamsungBrowser|Firefox|EdgA|OPR|YaBrowser|CriOS/i.test(ua)) {
-    return false;
-  }
-  return /Chrome\/\d+/i.test(ua);
-}
-
-function platformGetSplashViewportWidth() {
-  let vv =
-    typeof window !== "undefined" && window.visualViewport
-      ? window.visualViewport.width
-      : 0;
-  let docW =
-    typeof document !== "undefined" && document.documentElement
-      ? document.documentElement.clientWidth
-      : 0;
-  return Math.max(
-    vv,
-    typeof window !== "undefined" ? window.innerWidth || 0 : 0,
-    docW,
-    platformW
-  );
-}
-
-function platformApplySplashLogoStageSize(stage) {
-  if (!stage) {
-    return;
-  }
-  // Use computed px — some Samsung Chrome builds ignore CSS min(vw, px) and
-  // the stage collapses to a tiny intrinsic SVG size.
-  let screenW = platformGetSplashViewportWidth();
-  let w;
-  if (platformIsAndroidChrome()) {
-    // Larger guaranteed size; matches the non-Chrome Android browser look.
-    w = Math.min(Math.round(screenW * 0.72), 300);
-  } else {
-    // Original intent: min(58vw, 240px)
-    w = Math.min(Math.round(screenW * 0.58), 240);
-  }
-  let h = Math.round(w * (318.5 / 297.81));
-  stage.style.position = "relative";
-  stage.style.zIndex = "1";
-  stage.style.flexShrink = "0";
-  stage.style.flexGrow = "0";
-  stage.style.width = w + "px";
-  stage.style.height = h + "px";
-  stage.style.maxWidth = "none";
-  stage.style.aspectRatio = "auto";
-}
-
-function platformCommitSplashPieceRestPose(el) {
-  if (!el) {
-    return;
-  }
-  el.style.opacity = "1";
-  el.style.transform = "translate(0px, 0px) rotate(0deg) scale(1)";
-}
-
-function platformSyncSplashLogoStageSize() {
-  if (!platformSplashEl) {
-    return;
-  }
-  platformApplySplashLogoStageSize(
-    platformSplashEl.querySelector(".platform-splash-stage")
-  );
-}
-
-function platformEnsureSplashOverlay() {
-  if (platformSplashEl || typeof document === "undefined") {
-    return platformSplashEl;
-  }
-
-  let wrap = document.createElement("div");
-  wrap.id = "platform-splash";
-  wrap.setAttribute("aria-hidden", "true");
-  // Transparent shell — white comes from the pixel canvas underlay + p5 fill,
-  // which Android dark mode does not recolor like CSS backgrounds.
-  wrap.style.cssText =
-    "position:fixed;left:0;top:0;right:0;bottom:0;width:100%;height:100%;" +
-    "min-height:100dvh;min-height:-webkit-fill-available;z-index:40;" +
-    "display:flex;align-items:center;justify-content:center;" +
-    "background:transparent;pointer-events:none;opacity:1;";
-
-  let stage = document.createElement("div");
-  stage.className = "platform-splash-stage";
-  stage.style.visibility = "hidden";
-  platformApplySplashLogoStageSize(stage);
-  stage.innerHTML = PLATFORM_LOGO_SVG;
-  wrap.appendChild(stage);
-  document.body.appendChild(wrap);
-  platformSplashEl = wrap;
-
-  let svg = stage.querySelector("svg");
-  if (svg) {
-    svg.setAttribute("width", "100%");
-    svg.setAttribute("height", "100%");
-    svg.style.width = "100%";
-    svg.style.height = "100%";
-    svg.style.display = "block";
-    platformLockSplashLogoColors(svg);
-    // Hide every piece before first paint so we never flash the assembled logo.
-    Array.from(svg.querySelectorAll("polygon, path")).forEach((el) => {
-      el.style.opacity = "0";
-      el.style.transformOrigin = "center";
-      // view-box is more reliable than fill-box on Samsung Chrome.
-      el.style.transformBox = platformIsAndroidChrome() ? "view-box" : "fill-box";
-      el.style.transform = "translate(0px, 0px) scale(0.35)";
-    });
-    // Next frame: start bounce, then reveal the stage.
-    requestAnimationFrame(() => {
-      platformSyncSplashLogoStageSize();
-      platformAnimateSplashPieces(svg);
-      platformLockSplashLogoColors(svg);
-      requestAnimationFrame(() => {
-        stage.style.visibility = "visible";
-        platformLockSplashLogoColors(svg);
-      });
-    });
-  } else {
-    wrap.dataset.settleAt = String(Date.now() + 200);
-    stage.style.visibility = "visible";
-  }
-  return wrap;
-}
-
-function platformAnimateSplashPieces(svg) {
-  let polys = Array.from(svg.querySelectorAll("polygon"));
-  let paths = Array.from(svg.querySelectorAll("path"));
-  if (!polys.length && !paths.length) {
-    if (platformSplashEl) {
-      platformSplashEl.dataset.settleAt = String(Date.now() + 200);
-    }
-    return;
-  }
-
-  let markDirections = [
-    { dx: -70, dy: -110, rot: -28 },
-    { dx: 55, dy: -95, rot: 22 },
-    { dx: 95, dy: 20, rot: 34 },
-    { dx: 40, dy: 105, rot: -18 },
-    { dx: -85, dy: 70, rot: 26 }
-  ];
-
-  let markEnd = 0;
-  polys.forEach((el, i) => {
-    let dir = markDirections[i % markDirections.length];
-    let delay = i * 90;
-    let dur = 1080;
-    markEnd = Math.max(markEnd, delay + dur);
-    el.style.willChange = "transform, opacity";
-    // Keep hidden at the start pose until this piece's bounce begins.
-    el.style.opacity = "0";
-    el.style.transform =
-      "translate(" +
-      dir.dx +
-      "px, " +
-      dir.dy +
-      "px) rotate(" +
-      dir.rot +
-      "deg) scale(0.35)";
-
-    if (typeof el.animate === "function") {
-      let anim = el.animate(
-        [
-          {
-            offset: 0,
-            opacity: 0,
-            transform:
-              "translate(" +
-              dir.dx +
-              "px, " +
-              dir.dy +
-              "px) rotate(" +
-              dir.rot +
-              "deg) scale(0.35)"
-          },
-          {
-            offset: 0.58,
-            opacity: 1,
-            transform:
-              "translate(" +
-              dir.dx * 0.08 +
-              "px, 14px) rotate(" +
-              dir.rot * 0.15 +
-              "deg) scale(1.16)"
-          },
-          {
-            offset: 0.78,
-            opacity: 1,
-            transform:
-              "translate(0px, -7px) rotate(" +
-              -dir.rot * 0.08 +
-              "deg) scale(0.94)"
-          },
-          {
-            offset: 1,
-            opacity: 1,
-            transform: "translate(0px, 0px) rotate(0deg) scale(1)"
-          }
-        ],
-        {
-          duration: dur,
-          delay,
-          easing: "cubic-bezier(0.22, 1.55, 0.36, 1)",
-          fill: "both"
-        }
-      );
-      if (anim && anim.finished && typeof anim.finished.then === "function") {
-        anim.finished
-          .then(() => {
-            try {
-              anim.cancel();
-            } catch (e) {
-              // ignore
-            }
-            platformCommitSplashPieceRestPose(el);
-          })
-          .catch(() => platformCommitSplashPieceRestPose(el));
-      } else {
-        setTimeout(() => platformCommitSplashPieceRestPose(el), delay + dur + 30);
-      }
-    } else {
-      platformCommitSplashPieceRestPose(el);
-    }
-  });
-
-  // Wordmark overlaps the end of the triangle bounce.
-  let wordDelay = Math.max(320, markEnd - 420);
-  paths.forEach((el, i) => {
-    let delay = wordDelay + i * 48;
-    el.style.opacity = "0";
-    el.style.transform = "translate(0px, 14px) rotate(-6deg) scale(0.7)";
-    if (typeof el.animate === "function") {
-      let anim = el.animate(
-        [
-          {
-            offset: 0,
-            opacity: 0,
-            transform: "translate(0px, 14px) rotate(-6deg) scale(0.7)"
-          },
-          {
-            offset: 0.7,
-            opacity: 1,
-            transform: "translate(0px, -3px) rotate(1deg) scale(1.06)"
-          },
-          {
-            offset: 1,
-            opacity: 1,
-            transform: "translate(0px, 0px) rotate(0deg) scale(1)"
-          }
-        ],
-        {
-          duration: 720,
-          delay,
-          easing: "cubic-bezier(0.22, 1.45, 0.36, 1)",
-          fill: "both"
-        }
-      );
-      if (anim && anim.finished && typeof anim.finished.then === "function") {
-        anim.finished
-          .then(() => {
-            try {
-              anim.cancel();
-            } catch (e) {
-              // ignore
-            }
-            platformCommitSplashPieceRestPose(el);
-          })
-          .catch(() => platformCommitSplashPieceRestPose(el));
-      } else {
-        setTimeout(() => platformCommitSplashPieceRestPose(el), delay + 720 + 30);
-      }
-    } else {
-      platformCommitSplashPieceRestPose(el);
-    }
-  });
-
-  let settleMs = wordDelay + paths.length * 48 + 720;
-  if (platformSplashEl) {
-    platformSplashEl.dataset.settleAt = String(Date.now() + settleMs);
-  }
 }
 
 // --- Intro, loading morph & viewport ---
@@ -5737,7 +5623,6 @@ function platformApplyViewportLayout() {
   }
 
   platformFitCanvasToScreen();
-  platformSyncSplashLogoStageSize();
 }
 
 function platformBindViewportListeners() {

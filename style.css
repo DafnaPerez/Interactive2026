@@ -17,7 +17,6 @@ body {
   overflow: hidden;
   background: #ffffff;
   background-color: #ffffff !important;
-  background-image: linear-gradient(#ffffff, #ffffff);
   color-scheme: only light;
   forced-color-adjust: none;
   -webkit-forced-color-adjust: none;
@@ -28,7 +27,6 @@ body {
   inset: 0;
   background: #ffffff;
   background-color: #ffffff !important;
-  background-image: linear-gradient(#ffffff, #ffffff);
 }
 
 main {
@@ -40,7 +38,6 @@ main {
   overflow: hidden;
   background: #ffffff;
   background-color: #ffffff !important;
-  background-image: linear-gradient(#ffffff, #ffffff);
   forced-color-adjust: none;
   -webkit-forced-color-adjust: none;
 }
@@ -54,21 +51,4 @@ canvas {
   background-color: #ffffff !important;
   forced-color-adjust: none;
   -webkit-forced-color-adjust: none;
-}
-
-#platform-splash {
-  background: transparent !important;
-  background-color: transparent !important;
-  background-image: none !important;
-}
-
-#platform-splash-white-canvas {
-  background: transparent !important;
-}
-
-#platform-splash svg,
-#platform-splash svg * {
-  forced-color-adjust: none !important;
-  -webkit-forced-color-adjust: none !important;
-  fill-opacity: 1 !important;
 }
