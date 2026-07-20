@@ -144,6 +144,7 @@ let platformAudioBufferPromises = Object.create(null);
 let platformAudioActiveSources = [];
 let platformAudioGestureBound = false;
 let platformIgnoreNextMousePress = false;
+let platformIgnoreNextTouchStarted = false;
 const PLATFORM_AUDIO_MASTER_GAIN = 0.42;
 const PLATFORM_SFX_SAMPLE_V = 24;
 const PLATFORM_SFX_SAMPLE_URLS = {
@@ -184,22 +185,22 @@ const PLATFORM_SHARE_PUBLIC_URL = "https://dafnaperez.github.io/Interactive2026/
 const PLATFORM_SFX_OTHER_VOLUME_SCALE = 0.58;
 const PLATFORM_SFX = {
   select: { kind: "sample", sample: "select", gain: 0.62 },
-  correct: { kind: "sample", sample: "correct", gain: 0.22 },
-  correct2: { kind: "sample", sample: "correct2", gain: 0.22 },
-  wrong: { kind: "sample", sample: "wrong", gain: 0.22 },
-  progress: { kind: "pluck", freq: 884, dur: 0.09, gain: 0.001 },
+  correct: { kind: "sample", sample: "correct", gain: 0.18 },
+  correct2: { kind: "sample", sample: "correct2", gain: 0.18 },
+  wrong: { kind: "sample", sample: "wrong", gain: 0.18 },
+  progress: { kind: "pluck", freq: 884, dur: 0.09, gain: 0.1 },
   complete: { kind: "sample", sample: "complete", gain: 1.35 },
-  uiOpen: { kind: "pluck", freq: 440, dur: 0.14, gain: 0.001 },
-  uiClose: { kind: "pluck", freq: 370, dur: 0.12, gain: 0.0008 },
-  share: { kind: "pluck", freq: 660, dur: 0.15, gain: 0.001 }
+  uiOpen: { kind: "pluck", freq: 440, dur: 0.14, gain: 0.14 },
+  uiClose: { kind: "pluck", freq: 370, dur: 0.12, gain: 0.12 },
+  share: { kind: "pluck", freq: 660, dur: 0.15, gain: 0.14 }
 };
 
 const PLATFORM_SHARE_ANIMAL_PHRASE = {
-  turtle: "sea turtles",
-  eagle: "griffon vultures",
-  deer: "gazelles",
-  toad: "toads",
-  hyena: "hyenas"
+  turtle: "Green Sea Turtles",
+  eagle: "Griffon Vultures",
+  deer: "Acacia Gazelles",
+  toad: "Pelobates Syriacus",
+  hyena: "Striped Hyenas"
 };
 
 const ANIMAL_REF_W = REF_W;
@@ -615,6 +616,24 @@ function platformIsIosDevice() {
     /iP(hone|od|ad)/.test(navigator.userAgent) ||
     (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
   );
+}
+
+function platformIsAndroidDevice() {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  return /Android/i.test(navigator.userAgent);
+}
+
+function platformApplyPixelDensity() {
+  // Android Chromium often reports 2.5–3.5 DPR; full density + piece physics
+  // causes occasional hitch during triangle connect. Cap without changing look much.
+  let d = displayDensity();
+  if (platformIsAndroidDevice()) {
+    pixelDensity(min(2, d));
+  } else {
+    pixelDensity(d);
+  }
 }
 
 function platformIsSafari() {
@@ -1127,7 +1146,7 @@ const platformText = {
 
   share: {
     title: "Share this poster",
-    body: "Help friends discover how everyday choices\ncan protect the israeli wildlife.",
+    body: "Help friends discover how everyday choices\ncan protect the Israeli wildlife.",
     whatsapp: "WhatsApp",
     instagram: "Instagram",
     facebook: "Facebook",
@@ -1202,7 +1221,7 @@ function platformLoadAllGameAssets() {
 }
 
 function platformApplyCanvasSize() {
-  pixelDensity(displayDensity());
+  platformApplyPixelDensity();
   resizeCanvas(platformW, platformH);
   platformApplyViewportLayout();
 }
@@ -1302,30 +1321,25 @@ function platformPlayHtmlEl(el, volume = 0.55) {
   }
   platformAudioApplyPlaybackSession();
   try {
-    // cloneNode avoids seek latency from currentTime=0 on the shared element.
-    let node = el.cloneNode(true);
-    node.muted = false;
-    node.volume = Math.max(0, Math.min(1, volume));
-    node.style.cssText =
-      "position:fixed;width:0;height:0;opacity:0;pointer-events:none;";
-    document.body.appendChild(node);
-    let cleanup = () => {
-      try {
-        node.pause();
-      } catch (e) {
-        // ignore
+    // Reuse the primed element. cloneNode() re-buffers on iPhone and makes
+    // correct/wrong (and select) feel late vs Android.
+    el.muted = false;
+    el.volume = Math.max(0, Math.min(1, volume));
+    try {
+      el.pause();
+    } catch (e) {
+      // ignore
+    }
+    try {
+      if (el.currentTime !== 0) {
+        el.currentTime = 0;
       }
-      if (node.parentNode) {
-        node.parentNode.removeChild(node);
-      }
-    };
-    node.addEventListener("ended", cleanup);
-    setTimeout(cleanup, 8000);
-    let playResult = node.play();
+    } catch (e) {
+      // ignore
+    }
+    let playResult = el.play();
     if (playResult && typeof playResult.catch === "function") {
-      playResult.catch(() => {
-        cleanup();
-      });
+      playResult.catch(() => {});
     }
     platformAudioUnlocked = true;
     return true;
@@ -1378,8 +1392,8 @@ function platformEnsurePluckHtmlEl(patch) {
   if (typeof document === "undefined" || !patch) {
     return null;
   }
-  // Versioned key so older loud blobs are dropped after volume changes.
-  let key = "pluck:v3:" + patch.freq + ":" + patch.dur;
+  // Versioned key so older quiet blobs are dropped after volume changes.
+  let key = "pluck:v6:" + patch.freq + ":" + patch.dur;
   if (platformAudioHtmlEls[key]) {
     return platformAudioHtmlEls[key];
   }
@@ -1387,9 +1401,9 @@ function platformEnsurePluckHtmlEl(patch) {
   el.setAttribute("playsinline", "");
   el.setAttribute("webkit-playsinline", "");
   el.preload = "auto";
-  // Bake quiet into the sample — iOS often ignores HTMLAudio.volume on clones.
-  el.src = platformBuildToneBlobUrl(patch.freq, Math.max(0.06, patch.dur || 0.1), 0.035);
-  el.volume = platformAudioMuted ? 0 : 0.35;
+  // UI menu/share beeps — loud enough on Android + iPhone (quiz SFX are separate).
+  el.src = platformBuildToneBlobUrl(patch.freq, Math.max(0.06, patch.dur || 0.1), 0.32);
+  el.volume = platformAudioMuted ? 0 : 1;
   el.style.cssText =
     "position:fixed;width:0;height:0;opacity:0;pointer-events:none;";
   document.body.appendChild(el);
@@ -1412,9 +1426,10 @@ function platformPlayPluckHtml(patch) {
   }
   platformAudioApplyPlaybackSession();
   try {
-    // Don't clone — volume is unreliable on iOS clones; sample is already quiet.
+    // Volume 1 on both platforms — sample is already leveled. Android used to
+    // multiply a low .volume on top and sounded much quieter than iPhone.
     el.muted = false;
-    el.volume = 0.28;
+    el.volume = 1;
     try {
       if (el.ended || el.currentTime > 0.02) {
         el.currentTime = 0;
@@ -1443,37 +1458,8 @@ function platformWarmUiPluckHtml() {
 }
 
 function platformPlaySelectHtml() {
-  // Hot path: reuse the primed element. cloneNode() re-buffers and makes the
-  // first triangle tap feel late relative to the zoom.
-  let el = platformEnsureHtmlSampleEl("select");
-  if (platformAudioMuted || !el) {
-    return false;
-  }
-  platformAudioApplyPlaybackSession();
-  try {
-    el.muted = false;
-    el.volume = 0.7;
-    try {
-      el.pause();
-    } catch (e) {
-      // ignore
-    }
-    try {
-      el.currentTime = 0;
-    } catch (e) {
-      // ignore
-    }
-    let playResult = el.play();
-    if (playResult && typeof playResult.catch === "function") {
-      playResult.catch(() => {
-        platformPlayHtmlEl(el, 0.7);
-      });
-    }
-    platformAudioUnlocked = true;
-    return true;
-  } catch (e) {
-    return platformPlayHtmlEl(el, 0.7);
-  }
+  // Same hot path as other samples — keep a dedicated entry for the intro tap.
+  return platformPlayHtmlSample("select", 0.7);
 }
 
 function platformPreloadAllHtmlSamples() {
@@ -1822,19 +1808,31 @@ function platformPlaySfx(name) {
   // Unlock Web Audio in-gesture for any later/delayed playback.
   platformAudioUnlockSync();
 
-  // Sample SFX: HTMLAudio play() in this tap stack (same fix as triangle select).
+  // Sample SFX: HTMLAudio play() on the primed element (no clone — iOS lag).
   if (patch.kind === "sample") {
     let vol;
     if (patch.sample === "complete") {
       vol = 1;
     } else if (patch.sample === "select") {
       vol = 0.7;
+    } else if (
+      patch.sample === "correct" ||
+      patch.sample === "correct2" ||
+      patch.sample === "wrong"
+    ) {
+      // Answer cues only — keep a bit under the old level, independent of UI beeps.
+      vol = Math.max(
+        0.05,
+        Math.min(1, (patch.gain || 0.6) * 0.9 * PLATFORM_SFX_OTHER_VOLUME_SCALE)
+      );
     } else {
       vol = Math.max(
         0.05,
         Math.min(1, (patch.gain || 0.6) * 0.9 * PLATFORM_SFX_OTHER_VOLUME_SCALE)
       );
     }
+    // Ensure element exists before play (preload may not have finished yet).
+    platformEnsureHtmlSampleEl(patch.sample);
     if (patch.sample === "complete") {
       platformStopActiveSfx();
       Object.keys(platformAudioHtmlEls).forEach((key) => {
@@ -1855,11 +1853,11 @@ function platformPlaySfx(name) {
     }
   }
 
-  // UI plucks: HTMLAudio only (sample is pre-baked quiet). Skip Web Audio —
-  // oscillators were reading much louder than the HTML path on device.
+  // UI plucks: HTMLAudio first; Web Audio fallback if HTML play fails.
   if (patch.kind === "pluck") {
-    platformPlayPluckHtml(patch);
-    return;
+    if (platformPlayPluckHtml(patch)) {
+      return;
+    }
   }
 
   let run = () => {
@@ -1993,7 +1991,7 @@ function platformNotifyFinalReveal(p) {
 // setup / draw / mouse / touch / resize / Escape routing.
 
 function setup() {
-  pixelDensity(displayDensity());
+  platformApplyPixelDensity();
   let cnv = createCanvas(platformW, platformH);
   let mainEl = document.querySelector("main");
 
@@ -2008,6 +2006,7 @@ function setup() {
   platformPreloadAllHtmlSamples();
   platformBindAudioGestureUnlock();
   platformBindViewportListeners();
+  platformBindIntroCanvasPointer();
   platformApplyViewportLayout();
   platformApplyStartupQuery();
 
@@ -2069,15 +2068,14 @@ function draw() {
   }
 }
 
-function mousePressed() {
+function mousePressed(event) {
   // iOS synthesizes mouse events after touch; audio unlock/play only counts on touchstart.
   if (platformIgnoreNextMousePress) {
     platformIgnoreNextMousePress = false;
     return;
   }
   if (platformMode === "intro" || platformCanAcceptIntroPressFromSplash()) {
-    platformFinishSplashForIntroIfNeeded();
-    platformHandleIntroPress(mouseX, mouseY);
+    platformTryIntroPressFromEvent(event);
     return;
   }
   if (platformMode === "splash") {
@@ -2113,20 +2111,105 @@ function mousePressed() {
   platformInvokeAnimal("mousePressed");
 }
 
-function platformIntroPointerXY() {
-  // Prefer live touch samples — on the first iOS tap mouseX/Y can still be stale.
+function platformEventToCanvasXY(event) {
+  let clientX = null;
+  let clientY = null;
+  if (event) {
+    if (event.touches && event.touches.length > 0) {
+      clientX = event.touches[0].clientX;
+      clientY = event.touches[0].clientY;
+    } else if (event.changedTouches && event.changedTouches.length > 0) {
+      clientX = event.changedTouches[0].clientX;
+      clientY = event.changedTouches[0].clientY;
+    } else if (typeof event.clientX === "number") {
+      clientX = event.clientX;
+      clientY = event.clientY;
+    }
+  }
+  let cnv = typeof document !== "undefined" ? document.querySelector("canvas") : null;
+  if (cnv && clientX != null && clientY != null) {
+    let rect = cnv.getBoundingClientRect();
+    if (rect.width > 1 && rect.height > 1) {
+      return {
+        x: ((clientX - rect.left) / rect.width) * platformW,
+        y: ((clientY - rect.top) / rect.height) * platformH
+      };
+    }
+  }
   if (typeof touches !== "undefined" && touches.length > 0) {
     return { x: touches[0].x, y: touches[0].y };
   }
   return { x: mouseX, y: mouseY };
 }
 
-function touchStarted() {
+function platformTryIntroPressFromEvent(event) {
+  if (platformIntroTransitionActive) {
+    return false;
+  }
+  if (!(platformMode === "intro" || platformCanAcceptIntroPressFromSplash())) {
+    return false;
+  }
+  platformFinishSplashForIntroIfNeeded();
+  let pt = platformEventToCanvasXY(event);
+  return platformHandleIntroPress(pt.x, pt.y);
+}
+
+function platformBindIntroCanvasPointer() {
+  if (typeof document === "undefined") {
+    return;
+  }
+  let cnv = document.querySelector("canvas");
+  if (!cnv || cnv.dataset.platformIntroPointerBound === "1") {
+    return;
+  }
+  cnv.dataset.platformIntroPointerBound = "1";
+
+  let onDown = (event) => {
+    if (!(platformMode === "intro" || platformCanAcceptIntroPressFromSplash())) {
+      return;
+    }
+    if (platformIntroTransitionActive) {
+      return;
+    }
+    // Ignore secondary mouse buttons.
+    if (typeof event.button === "number" && event.button !== 0) {
+      return;
+    }
+    let hit = platformTryIntroPressFromEvent(event);
+    if (hit) {
+      // Stop p5's follow-up touchStarted + synthetic mousePressed from
+      // double-firing or eating the success as a "miss".
+      platformIgnoreNextMousePress = true;
+      platformIgnoreNextTouchStarted = true;
+      if (typeof event.preventDefault === "function") {
+        event.preventDefault();
+      }
+    }
+  };
+
+  cnv.addEventListener("pointerdown", onDown, { passive: false });
+  // Older WebKit paths without PointerEvent still get a native touch sample.
+  cnv.addEventListener(
+    "touchstart",
+    (event) => {
+      if (typeof window !== "undefined" && window.PointerEvent) {
+        return;
+      }
+      onDown(event);
+    },
+    { passive: false }
+  );
+}
+
+function touchStarted(event) {
+  if (platformIgnoreNextTouchStarted) {
+    platformIgnoreNextTouchStarted = false;
+    return false;
+  }
+
   // Menu is visible during splash fade-in; accept that tap and finish splash.
   if (platformMode === "intro" || platformCanAcceptIntroPressFromSplash()) {
-    platformFinishSplashForIntroIfNeeded();
-    let pt = platformIntroPointerXY();
-    let hit = platformHandleIntroPress(pt.x, pt.y);
+    let hit = platformTryIntroPressFromEvent(event);
     // Only suppress the synthetic mouse click when this touch actually selected
     // a triangle. Otherwise a miss (stale coords) used to eat the real click.
     if (hit) {
@@ -2152,7 +2235,7 @@ function touchStarted() {
   }
 
   if (platformShareOpen) {
-    let pt = platformIntroPointerXY();
+    let pt = platformEventToCanvasXY(event);
     platformHandleSharePointerDown(pt.x, pt.y);
     return false;
   }
@@ -2807,12 +2890,22 @@ function platformDrawChoiceButton(bx, by, bw, bh, cornerR, hover = false, alpha 
 
   ctx.save();
   platformClipCircle(ctx, cx, cy, r);
-  ctx.shadowColor = `rgba(132, 124, 114, ${(hover ? 0.11 : 0.08) * a})`;
-  ctx.shadowBlur = ms(hover ? 22 : 18);
-  ctx.shadowOffsetX = 0;
-  ctx.shadowOffsetY = ms(hover ? 4 : 3);
-  ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
-  ctx.fill();
+  if (platformIsAndroidDevice()) {
+    // shadowBlur is expensive on Android Chromium while triangles are connecting.
+    ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+    ctx.fill();
+    ctx.fillStyle = `rgba(132, 124, 114, ${(hover ? 0.08 : 0.05) * a})`;
+    ctx.beginPath();
+    ctx.arc(cx, cy + ms(2), r, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.shadowColor = `rgba(132, 124, 114, ${(hover ? 0.11 : 0.08) * a})`;
+    ctx.shadowBlur = ms(hover ? 22 : 18);
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = ms(hover ? 4 : 3);
+    ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
+    ctx.fill();
+  }
   ctx.restore();
 
   ctx.save();
@@ -3158,6 +3251,7 @@ function platformHandleFinalActionPress() {
 
   let boxes = p.finalActionBoxes;
   if (platformWasBoxClicked(boxes.home)) {
+    platformPlayUiOpenSfx();
     platformReturnToIntro();
     return;
   }
@@ -3243,6 +3337,11 @@ function platformCanBakeSharePreviewStill(p) {
 
 function platformTryBakeSharePreviewStill(p) {
   if (!p || platformShareOpen) {
+    return;
+  }
+  // Android: baking a full preview mid-assemble hitchs the connect animation.
+  // Share open already bakes on demand.
+  if (platformIsAndroidDevice()) {
     return;
   }
   if (!platformCanBakeSharePreviewStill(p)) {
@@ -5507,13 +5606,24 @@ function platformHandleIntroPress(x, y) {
     return false;
   }
 
+  // Expand triangles for easier taps on iPhone.
+  let pad = ms(32);
+
   for (let i = 0; i < platformAnimals.length; i++) {
     let pts = platformGetAnimatedTrianglePoints(i);
+    let cx = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
+    let cy = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
+    let grow = (p) => {
+      let dx = p[0] - cx;
+      let dy = p[1] - cy;
+      let len = Math.hypot(dx, dy) || 1;
+      return [p[0] + (dx / len) * pad, p[1] + (dy / len) * pad];
+    };
+    let g0 = grow(pts[0]);
+    let g1 = grow(pts[1]);
+    let g2 = grow(pts[2]);
 
-    if (platformPointInTriangle(x, y, pts[0], pts[1], pts[2])) {
-      let cx = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
-      let cy = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
-
+    if (platformPointInTriangle(x, y, g0, g1, g2)) {
       // Play select FIRST in the gesture, then start zoom slightly later so
       // the sound attack and zoom feel locked together.
       platformAudioApplyPlaybackSession();
@@ -7700,7 +7810,18 @@ function platformLooseApplyPushDelta(
 }
 
 function platformLooseGetProfile(cfg) {
-  return platformLooseResolveProfile(cfg);
+  // Cache resolved profile — was allocating a new object on every piece/frame
+  // and causing occasional GC hitch on Android during connect.
+  let ver = platformLooseLayoutVersion;
+  if (cfg && cfg._looseProfile && cfg._looseProfileVer === ver) {
+    return cfg._looseProfile;
+  }
+  let profile = platformLooseResolveProfile(cfg);
+  if (cfg) {
+    cfg._looseProfile = profile;
+    cfg._looseProfileVer = ver;
+  }
+  return profile;
 }
 
 function platformLooseGetPivot(cfg) {
@@ -8324,7 +8445,15 @@ function platformLooseRepelFromConnectedPieces(
 
   let ox = offsetX;
   let oy = offsetY;
-  let maxIter = profile.hyenaStyleRepel ? 10 : 32;
+  // Android: fewer separation iters — same clearance goal via follow smoothing,
+  // avoids occasional frame spikes during connect.
+  let maxIter = profile.hyenaStyleRepel
+    ? platformIsAndroidDevice()
+      ? 6
+      : 10
+    : platformIsAndroidDevice()
+      ? 12
+      : 32;
 
   for (let iter = 0; iter < maxIter; iter++) {
     let moved = false;
@@ -9272,22 +9401,27 @@ function platformGetFinalRevealAlpha(clickCount, finalClickCount, startTime, int
   );
 }
 
+function platformTouchHitPad() {
+  // Extra invisible padding around every tappable box (choices, dock, share,
+  // back, animal menu). Visual size stays the same.
+  return ms(28);
+}
+
 function platformPointInBox(x, y, box) {
+  if (!box) {
+    return false;
+  }
+  let pad = platformTouchHitPad();
   return (
-    x > box.x &&
-    x < box.x + box.w &&
-    y > box.y &&
-    y < box.y + box.h
+    x > box.x - pad &&
+    x < box.x + box.w + pad &&
+    y > box.y - pad &&
+    y < box.y + box.h + pad
   );
 }
 
 function platformWasBoxClicked(box) {
-  return (
-    mouseX > box.x &&
-    mouseX < box.x + box.w &&
-    mouseY > box.y &&
-    mouseY < box.y + box.h
-  );
+  return platformPointInBox(mouseX, mouseY, box);
 }
 
 function platformApplyGrungeFont(font) {
@@ -9888,7 +10022,7 @@ const POSTER_LAYOUT = {
   shareIconSizeBonus: ms(2),
   shareInstagramIconBonusPx: 1,
   shareIconThicken: 2,
-  shareIconTouchSize: ms(52),
+  shareIconTouchSize: ms(72),
   shareSheetHeightRatio: 0.65,
   shareSheetNudgeY: 30,
   shareSheetTopRadius: ms(40),
@@ -9897,7 +10031,7 @@ const POSTER_LAYOUT = {
   shareSheetGrabTop: ms(10),
   shareSheetGrabNudgeY: 2,
   shareSheetContentNudgeY: 5,
-  shareSheetGrabHitH: ms(34),
+  shareSheetGrabHitH: ms(48),
   sharePreviewHeightRatio: 0.38,
   shareTitleNudgeY: ms(12),
   shareBodyNudgeY: ms(8),
@@ -10115,7 +10249,7 @@ const posterRegistry = {
     headerLeading: ms(18),
     finalFooter: { text: "Only 15 Green Sea Turtle\nnests in Israel" },
     finalBody: {
-      text: "Smart everyday choices can\nhelp protect sea turtles.\nReducing plastic, choosing\nreusable products and keeping\nbeaches clean can help sea\nturtles survive in nature."
+      text: "Smart everyday choices can\nhelp protect Green Sea\nTurtles. Reducing plastic,\nchoosing reusable products\nand keeping beaches clean\ncan help Green Sea Turtles\nsurvive in nature."
     },
     feedback: { good: PLATFORM_TEXT_RGB, bad: PLATFORM_TEXT_RGB, y: my(690), rgb: false },
     pipeline: ["bg", "animal", "finalTimer", "question", "footer", "feedback", "frame", "header"],
@@ -10216,7 +10350,7 @@ const posterRegistry = {
     headerLeading: ms(64),
     finalFooter: { text: "About 180 Griffon\nVultures left in Israel" },
     finalBody: {
-      text: "Smart everyday choices\ncan help protect vultures.\nReducing waste and keeping\nnature clean can help\nvultures survive across\nthe Israeli skies."
+      text: "Smart everyday choices\ncan help protect Griffon\nVultures. Reducing waste\nand keeping nature clean\ncan help Griffon Vultures\nsurvive across the\nIsraeli skies."
     },
     feedback: { rgb: true, y: my(690) },
     pipeline: ["bg", "animal", "question", "footer", "feedback", "frame", "header"],
@@ -10326,7 +10460,7 @@ const posterRegistry = {
     headerLeading: ms(64),
     finalFooter: { text: "46 Acacia Gazelles\nleft in Israel" },
     finalBody: {
-      text: "Smart everyday choices can\nhelp protect acacia gazelles.\nReducing waste, choosing\nresponsible products, and\nkeeping nature clean can\nhelp acacia gazelles survive."
+      text: "Smart everyday choices can\nhelp protect Acacia Gazelles.\nReducing waste, choosing\nresponsible products, and\nkeeping nature clean can\nhelp Acacia Gazelles survive."
     },
     textRgb: PLATFORM_TEXT_RGB,
     feedback: { rgb: true, y: my(700) },
@@ -10419,11 +10553,11 @@ const posterRegistry = {
     textRgb: PLATFORM_TEXT_RGB,
     choiceButtonColor: "#c1b783",
     choiceImageColor: "#3F4636",
-    headerTitle: "Pelobates syriacus",
+    headerTitle: "Pelobates Syriacus",
     headerLeading: ms(18),
     finalFooter: { text: "Only a few populations\nremain in Israel" },
     finalBody: {
-      text: "Pelobates syriacus depends\non seasonal ponds and clean\nwetlands to survive. Reducing\npollution and making better\nchoices can help them survive\nin their natural habitat."
+      text: "Pelobates Syriacus depends\non seasonal ponds and clean\nwetlands to survive. Reducing\npollution and making better\nchoices can help them survive\nin their natural habitat."
     },
     feedback: { rgb: true, y: my(690) },
     pipeline: ["bg", "animal", "finalTimer", "question", "footer", "feedback", "frame", "header"],
@@ -10528,7 +10662,7 @@ const posterRegistry = {
     headerLeading: ms(64),
     finalFooter: { text: "About 1,000 Striped\nHyenas left in Israel" },
     finalBody: {
-      text: "Smart everyday choices can\nhelp protect striped hyenas.\nReducing waste and keeping\nnature clean can prevent\nharm to wildlife and help\nstriped hyenas survive."
+      text: "Smart everyday choices can\nhelp protect Striped Hyenas.\nReducing waste and keeping\nnature clean can prevent\nharm to wildlife and help\nStriped Hyenas survive."
     },
     feedback: { rgb: true, y: my(700) },
     pipeline: ["bg", "animal", "finalTimer", "question", "footer", "feedback", "frame", "header"],
@@ -10581,6 +10715,13 @@ function platformClearSharedPosterCaches() {
   }
   for (let key in platformLooseGroupBBoxCache) {
     delete platformLooseGroupBBoxCache[key];
+  }
+  for (let id in posterRegistry) {
+    let cfg = posterRegistry[id] && posterRegistry[id].cfg;
+    if (cfg) {
+      cfg._looseProfile = null;
+      cfg._looseProfileVer = -1;
+    }
   }
 }
 
@@ -11241,6 +11382,8 @@ function posterHandleChoicePress(id) {
   if (clickedCorrect) {
     let newCount = cfg.nextClickCount(stage);
     p.clickCount = newCount;
+    // Fire answer SFX before heavy assemble/repel work so iPhone stays in sync.
+    platformTriggerCorrectFeedback(id);
     platformStartProgressFill(p, newCount);
 
     if (id === "toad") {
@@ -11265,7 +11408,6 @@ function posterHandleChoicePress(id) {
         }
       }
     }
-    platformTriggerCorrectFeedback(id);
   } else if (clickedWrong) {
     if (!p.wrongFallActive && !p.wrongWaitActive && !p.wrongRiseActive) {
       platformPlaySfx("wrong");
@@ -11273,9 +11415,9 @@ function posterHandleChoicePress(id) {
       p.wrongFallT = 0;
       p.wrongWaitActive = false;
       p.wrongRiseActive = false;
+      platformVibrateWrongAnswer();
       p.wrongFallEls = wrongFallBuildUIElements();
       p.wrongFallPieces = wrongFallBuildPieces(p.cfg.totalPieces || 15);
-      platformVibrateWrongAnswer();
     }
   }
 }
