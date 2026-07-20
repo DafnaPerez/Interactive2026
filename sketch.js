@@ -626,14 +626,23 @@ function platformIsAndroidDevice() {
 }
 
 function platformApplyPixelDensity() {
-  // Android Chromium often reports 2.5–3.5 DPR; full density + piece physics
-  // causes occasional hitch during triangle connect. Cap without changing look much.
+  // Android Chromium + many triangles (gazelle especially) hitch at high DPR.
   let d = displayDensity();
   if (platformIsAndroidDevice()) {
-    pixelDensity(min(2, d));
+    pixelDensity(min(1.25, d));
   } else {
     pixelDensity(d);
   }
+}
+
+function platformLooseAndroidHeavyAnimal(p) {
+  // Gazelle/toad run the costly hyena-style bbox repel with many pieces.
+  return (
+    platformIsAndroidDevice() &&
+    p &&
+    p.cfg &&
+    (p.cfg.id === "deer" || p.cfg.id === "toad")
+  );
 }
 
 function platformIsSafari() {
@@ -961,11 +970,19 @@ function posterDrawAnimalMobile(p) {
   scale(s);
   translate(-ANIMAL_REF_W / 2, -ANIMAL_ANCHOR_Y);
 
+  // Android gazelle/toad: one draw pass while connecting — dual pass doubles
+  // 38+ piece transform/repel cost and is the main hitch source.
+  let singlePass = platformLooseAndroidHeavyAnimal(p);
   platformTriangleDrawPass = 0;
+  if (singlePass) {
+    platformSuppressAnimalPieceDraw = false;
+  }
   p.cfg.drawAnimal();
 
-  platformTriangleDrawPass = 1;
-  p.cfg.drawAnimal();
+  if (!singlePass) {
+    platformTriangleDrawPass = 1;
+    p.cfg.drawAnimal();
+  }
 
   platformTriangleDrawPass = 0;
   platformSuppressAnimalPieceDraw = false;
@@ -1151,7 +1168,9 @@ const platformText = {
     instagram: "Instagram",
     facebook: "Facebook",
     copied: "Link copied — paste in Instagram",
-    copiedOpeningInstagram: "Copied — opening Instagram…",
+    copiedOpeningInstagram: "Caption copied — pick Instagram for the image",
+    copiedOpeningFacebook: "Opening Facebook — text ready for your post",
+    instagramFallback: "Caption copied — open Instagram and paste it",
     close: "Not now",
     back: "try another animal >>"
   }
@@ -3799,50 +3818,158 @@ function platformShowShareCopiedMessage(message, durationMs = 2400) {
   platformShareCopiedUntil = millis() + durationMs;
 }
 
-function platformShareViaNativeSheet(p, onFallback) {
-  let payload = platformGetSharePayload(p);
-
-  if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
-    navigator.share({ text: payload.text }).catch((err) => {
-      if (err.name === "AbortError") {
-        return;
-      }
-      onFallback(p, payload);
-    });
-    return;
+function platformGetShareImageCanvas(p) {
+  let still = platformBakeSharePreviewStill(p);
+  if (!still) {
+    return null;
   }
-
-  onFallback(p, payload);
+  return still.canvas || still.elt || null;
 }
 
-function platformShareInstagramFallback(p, payload) {
-  platformCopyShareText(payload.text);
-  platformShowShareCopiedMessage(platformText.share.copiedOpeningInstagram);
+function platformCanvasToImageFile(canvas, fileName) {
+  if (!canvas || typeof canvas.toDataURL !== "function") {
+    return null;
+  }
+  try {
+    let dataUrl = canvas.toDataURL("image/png");
+    let parts = dataUrl.split(",");
+    if (parts.length < 2) {
+      return null;
+    }
+    let mimeMatch = parts[0].match(/:(.*?);/);
+    let mime = (mimeMatch && mimeMatch[1]) || "image/png";
+    let binary = atob(parts[1]);
+    let bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new File([bytes], fileName || "wildlife-poster.png", { type: mime });
+  } catch (err) {
+    return null;
+  }
+}
 
-  if (typeof window !== "undefined") {
-    window.location.href = "instagram://app";
+function platformGetShareImageFile(p) {
+  let canvas = platformGetShareImageCanvas(p);
+  let animalId = (p && p.id) || platformMode || "poster";
+  return platformCanvasToImageFile(canvas, animalId + "-poster.png");
+}
+
+function platformDownloadShareImage(p) {
+  let canvas = platformGetShareImageCanvas(p);
+  if (!canvas || typeof document === "undefined") {
+    return false;
+  }
+  try {
+    let link = document.createElement("a");
+    link.href = canvas.toDataURL("image/png");
+    link.download = ((p && p.id) || "wildlife") + "-poster.png";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    return true;
+  } catch (err) {
+    return false;
   }
 }
 
 function platformShareViaInstagram(p) {
-  platformPlaySfx("share");
-  platformShareViaNativeSheet(p, platformShareInstagramFallback);
-}
-
-function platformShareFacebookFallback(p, payload) {
-  let encoded = encodeURIComponent(payload.url);
-
-  if (typeof window !== "undefined" && platformIsTouchLikeDevice()) {
-    window.location.href = "https://m.facebook.com/sharer.php?u=" + encoded;
+  if (typeof window === "undefined") {
     return;
   }
 
-  platformOpenExternalUrl("https://www.facebook.com/sharer/sharer.php?u=" + encoded);
+  platformPlaySfx("share");
+  let payload = platformGetSharePayload(p);
+  // Caption can't reliably be injected into Instagram from the web — copy it.
+  platformCopyShareText(payload.text);
+
+  let file = platformGetShareImageFile(p);
+  let shareData = file ? { files: [file], title: "" } : null;
+
+  // Best path: system share sheet with the animal image. User picks Instagram
+  // (Stories / Feed / Messages). Caption is already on the clipboard.
+  if (
+    shareData &&
+    typeof navigator !== "undefined" &&
+    typeof navigator.canShare === "function" &&
+    navigator.canShare(shareData) &&
+    typeof navigator.share === "function"
+  ) {
+    navigator
+      .share(shareData)
+      .then(() => {
+        platformShowShareCopiedMessage(platformText.share.copiedOpeningInstagram);
+      })
+      .catch((err) => {
+        if (err && err.name === "AbortError") {
+          return;
+        }
+        platformShareInstagramFallback(p, payload);
+      });
+    return;
+  }
+
+  platformShareInstagramFallback(p, payload);
+}
+
+function platformShareInstagramFallback(p, payload) {
+  platformCopyShareText(payload.text);
+  platformDownloadShareImage(p);
+  platformShowShareCopiedMessage(platformText.share.instagramFallback);
+
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  // Open Instagram; user creates a post from the saved image and pastes caption.
+  let opened = false;
+  try {
+    window.location.href = "instagram://app";
+    opened = true;
+  } catch (err) {
+    opened = false;
+  }
+  if (!opened || !platformIsTouchLikeDevice()) {
+    platformOpenExternalUrl("https://www.instagram.com/");
+  }
 }
 
 function platformShareViaFacebook(p) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
   platformPlaySfx("share");
-  platformShareViaNativeSheet(p, platformShareFacebookFallback);
+  let payload = platformGetSharePayload(p);
+  // Facebook often strips prefilled "quote" text — clipboard is the reliable backup.
+  platformCopyShareText(payload.text);
+  platformShowShareCopiedMessage(platformText.share.copiedOpeningFacebook);
+
+  let u = encodeURIComponent(payload.url);
+  let q = encodeURIComponent(payload.message);
+  let sharer =
+    "https://www.facebook.com/sharer/sharer.php?u=" + u + "&quote=" + q;
+
+  if (platformIsAndroidDevice()) {
+    // Prefer the Facebook app via Android intent, fall back to the web sharer.
+    window.location.href =
+      "intent://www.facebook.com/sharer/sharer.php?u=" +
+      u +
+      "&quote=" +
+      q +
+      "#Intent;scheme=https;package=com.facebook.katana;S.browser_fallback_url=" +
+      encodeURIComponent(sharer) +
+      ";end";
+    return;
+  }
+
+  if (platformIsTouchLikeDevice()) {
+    // iPhone / mobile: https sharer usually hands off into the Facebook app.
+    window.location.href = sharer;
+    return;
+  }
+
+  platformOpenExternalUrl(sharer);
 }
 
 function platformGetShareSheetHeight() {
@@ -7624,8 +7751,12 @@ function platformLooseApplyGroupedRepel(
       }
     }
 
-    let bboxPasses =
-      p.cfg.id === "toad" ? min(6, 3 + connectedGroups) : 3;
+    // Android: one clearance pass for toad/deer. Desktop toad keeps multi-pass.
+    let bboxPasses = platformLooseAndroidHeavyAnimal(p)
+      ? 1
+      : p.cfg.id === "toad"
+        ? min(6, 3 + connectedGroups)
+        : 3;
 
     for (let pass = 0; pass < bboxPasses; pass++) {
       cleared = platformLooseClearLooseFromConnectedBBox(
@@ -7658,6 +7789,18 @@ function platformLooseApplyPushDelta(
   }
 
   let profile = platformLooseGetProfile(p.cfg);
+
+  // Android gazelle/toad: reuse last smoothed repel on odd frames (halves CPU).
+  if (
+    platformLooseAndroidHeavyAnimal(p) &&
+    profile.hyenaStyleRepel &&
+    frameCount % 2 === 1 &&
+    p.looseRepelSmooth &&
+    p.looseRepelSmooth[index]
+  ) {
+    let prev = p.looseRepelSmooth[index];
+    return { x: offsetX + prev.x, y: offsetY + prev.y };
+  }
 
   if (p.cfg.getPieceGroup) {
     let cleared = platformLooseApplyGroupedRepel(
@@ -7694,7 +7837,8 @@ function platformLooseApplyPushDelta(
     let boostActive = p.cfg.id === "toad" && p.toadRepelBoost > 0;
 
     if (boostActive) {
-      follow = 0.55;
+      // Android: gentler catch-up so connect frames don't spike.
+      follow = platformIsAndroidDevice() ? 0.28 : 0.55;
       p.toadRepelBoost--;
     }
 
@@ -8448,9 +8592,11 @@ function platformLooseRepelFromConnectedPieces(
   // Android: fewer separation iters — same clearance goal via follow smoothing,
   // avoids occasional frame spikes during connect.
   let maxIter = profile.hyenaStyleRepel
-    ? platformIsAndroidDevice()
-      ? 6
-      : 10
+    ? platformLooseAndroidHeavyAnimal(p)
+      ? 3
+      : platformIsAndroidDevice()
+        ? 6
+        : 10
     : platformIsAndroidDevice()
       ? 12
       : 32;
@@ -9030,6 +9176,11 @@ function platformGetLooseWobbleDampen(p, pieceGroup, absX, absY, pieceT, index =
     return 1;
   }
 
+  // Android gazelle: skip per-piece near-body distance queries (huge CPU save).
+  if (platformLooseAndroidHeavyAnimal(p)) {
+    return 1;
+  }
+
   let cfg = p.cfg;
   let profile = platformLooseGetProfile(cfg);
   let nearest = 999;
@@ -9158,7 +9309,17 @@ function platformApplyLoosePieceTransform(p, index, t) {
 
   // Stage 2 — bounds: slide target until triangle fits composition rect
   let baseRot = off.rot || 0;
-  target = platformLooseFitTargetOffset(cfg, pivot, target.x, target.y, index, baseRot);
+  // Android gazelle/toad: scatter targets are pre-clamped; skip per-frame fit.
+  if (!platformLooseAndroidHeavyAnimal(p)) {
+    target = platformLooseFitTargetOffset(
+      cfg,
+      pivot,
+      target.x,
+      target.y,
+      index,
+      baseRot
+    );
+  }
 
   // Stage 3 — motion: float wobble, zone push, assemble lerp
   let wobble = off.wobble || 1;
@@ -11387,8 +11548,13 @@ function posterHandleChoicePress(id) {
     platformStartProgressFill(p, newCount);
 
     if (id === "toad") {
-      p.toadRepelBoost = 160;
-      platformToadWarmLooseRepel(p);
+      // Android: skip the heavy warm-all-pieces spike; lighter boost is enough.
+      if (platformIsAndroidDevice()) {
+        p.toadRepelBoost = 36;
+      } else {
+        p.toadRepelBoost = 160;
+        platformToadWarmLooseRepel(p);
+      }
     } else if (!platformLooseGetProfile(cfg).hyenaStyleRepel) {
       p.looseRepelSmooth = null;
     }
