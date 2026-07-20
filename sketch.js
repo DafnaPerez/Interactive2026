@@ -626,13 +626,7 @@ function platformIsAndroidDevice() {
 }
 
 function platformApplyPixelDensity() {
-  // Android Chromium + many triangles (gazelle especially) hitch at high DPR.
-  // Cap hard at 1 — even 1.25× was still too heavy for 33–38 piece connect.
-  if (platformIsAndroidDevice()) {
-    pixelDensity(1);
-  } else {
-    pixelDensity(displayDensity());
-  }
+  pixelDensity(displayDensity());
 }
 
 function platformLooseAndroidHeavyAnimal(p) {
@@ -9384,14 +9378,9 @@ function platformDrawTri(hexColor, p1, p2, p3, weight = 1.1) {
   }
 
   fill(hexColor);
-  // Stroke sealing is expensive on Android Chromium with 30+ tris/frame.
-  if (platformAnimalDrawAllPieces) {
-    noStroke();
-  } else {
-    stroke(hexColor);
-    strokeWeight(weight);
-    strokeJoin(ROUND);
-  }
+  stroke(hexColor);
+  strokeWeight(weight);
+  strokeJoin(ROUND);
   triangle(p1[0], p1[1], p2[0], p2[1], p3[0], p3[1]);
 }
 
