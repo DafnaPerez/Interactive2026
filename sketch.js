@@ -9710,11 +9710,21 @@ function platformApplyLoosePieceTransform(p, index, t) {
   }
 
   // Fully home — skip scatter/repel math (identity matrix).
+  // Exception: wrong-answer fall/wait/rise must still move assembled pieces.
   if (
     t >= 0.995 &&
     !(p.disassembleBoost > 0) &&
     !(p.disassembleRepelWarmup > 0)
   ) {
+    if (p.wrongFallActive || p.wrongWaitActive || p.wrongRiseActive) {
+      let cfg = p.cfg;
+      let pivot = platformLooseGetProfile(cfg).pivot;
+      let pieceFall = wrongFallGetPieceDrawOffset(p, index, cfg);
+      translate(pivot.x + pieceFall.x, pivot.y + pieceFall.y);
+      rotate(pieceFall.rot);
+      translate(-pivot.x, -pivot.y);
+      return;
+    }
     return;
   }
 
