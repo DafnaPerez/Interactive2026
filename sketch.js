@@ -11175,12 +11175,14 @@ const posterRegistry = {
     resetFinalOnCorrect: true,
     nextClickCount(stage) { return stage + 1; },
     isFullyAssembled(p) {
+      // 0.85 ≈ visually locked (ease curve is ~95% home). 0.96 waited on
+      // a long tail of the assemble lerp and made the complete SFX late.
       return (
         p.clickCount >= 3 &&
-        p.tGroup[0] > 0.96 &&
-        p.tGroup[1] > 0.96 &&
-        p.tGroup[2] > 0.96 &&
-        p.tGroup[3] > 0.96
+        p.tGroup[0] > 0.85 &&
+        p.tGroup[1] > 0.85 &&
+        p.tGroup[2] > 0.85 &&
+        p.tGroup[3] > 0.85
       );
     },
     randomSeed: 140,
