@@ -541,8 +541,8 @@ function platformManualBlurCanvasInto(sourceCanvas, destCanvas, blurPx) {
   sctx.drawImage(platformBlurDownCanvas, 0, 0, dw, dh, 0, 0, sw, sh);
 }
 
-// iPhone live overlay blur: downscale → Gaussian at small size → keep small.
-// Stretched when drawn. Updates every frame without freezing or full-res lag.
+// Mobile live overlay blur: downscale → Gaussian at small size → keep small.
+// Stretched when drawn. Full-res blur every frame jitters share/menu open on Android.
 function platformIosLiveBlurCanvas(sourceCanvas, blurPx) {
   let sw = sourceCanvas.width | 0;
   let sh = sourceCanvas.height | 0;
@@ -872,8 +872,9 @@ function platformBlurCanvasSource(sourceCanvas, blurPx) {
     return null;
   }
 
-  // iPhone: live small-buffer Gaussian each frame (smooth + cheap).
-  if (platformIsIosDevice()) {
+  // Mobile: live small-buffer Gaussian each frame (smooth + cheap).
+  // Full-res canvas filter blur on Android Chromium stalls the open animation.
+  if (platformIsIosDevice() || platformIsAndroidDevice()) {
     return platformIosLiveBlurCanvas(sourceCanvas, blurPx);
   }
 
@@ -2812,6 +2813,16 @@ function platformDrawFinalActionDockShapeShadow(dock, hover, a, gfx = null) {
   let bw = dock.w;
   let bh = dock.h;
 
+  // Android: canvas filter blur on the dock each frame stalls menu/share open.
+  if (platformIsAndroidDevice()) {
+    ctx.save();
+    platformFinalActionDockPath(ctx, bx, by + ms(4), bw, bh);
+    ctx.fillStyle = `rgba(132, 124, 114, ${(hover ? 0.16 : 0.12) * a})`;
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
   ctx.save();
   ctx.filter = `blur(${ms(18)}px)`;
   platformFinalActionDockPath(ctx, bx, by - ms(6), bw, bh);
@@ -3030,9 +3041,10 @@ function platformDrawMenuGlassCircle(
   // full extra blur bake on open and made iPhone sheet animation stutter.
   let frostBlur = PLATFORM_SHARE_BACKDROP_BLUR_PX;
   let frostAlpha = (hover ? 0.34 : 0.28) * a;
-  let iosLite = platformIsIosDevice();
+  // Android Chromium: filter + shadowBlur on every menu circle stalls open fade.
+  let liteGlass = platformIsIosDevice() || platformIsAndroidDevice();
 
-  if (!iosLite) {
+  if (!liteGlass) {
     ctx.save();
     platformClipCircle(ctx, cx, cy, r);
     ctx.filter = `blur(${ms(22)}px)`;
@@ -3061,7 +3073,7 @@ function platformDrawMenuGlassCircle(
     ctx.fill();
     ctx.restore();
   } else {
-    // Cheap soft drop shadow — WebKit filter/shadowBlur on many circles is laggy.
+    // Cheap soft drop shadow — filter/shadowBlur on many circles is laggy.
     ctx.save();
     platformClipCircle(ctx, cx + ms(0.5), cy + ms(3), r);
     ctx.fillStyle = `rgba(20, 16, 12, ${(hover ? 0.2 : 0.14) * a})`;
@@ -3069,7 +3081,7 @@ function platformDrawMenuGlassCircle(
     ctx.restore();
   }
 
-  if (baseSnap && !iosLite) {
+  if (baseSnap && !liteGlass) {
     let blurredFrost = platformGetBlurredSnap(baseSnap, frostBlur);
     ctx.save();
     platformClipCircle(ctx, cx, cy, r);
@@ -3639,11 +3651,20 @@ function platformOpenShare() {
   platformShareOpenTime = millis();
   platformShareCopiedUntil = 0;
   platformShareCopiedMessage = "";
-  if (p) {
-    platformBakeSharePreviewStill(p);
-  }
   platformShareBoxes = p ? platformGetShareOverlayLayout(p) : null;
   platformPlayUiOpenSfx();
+  if (p) {
+    if (platformIsAndroidDevice()) {
+      // Bake after the sheet starts sliding — sync get()+redraw hitchs open.
+      setTimeout(() => {
+        if (platformShareOpen && posterRegistry[platformMode] === p) {
+          platformBakeSharePreviewStill(p);
+        }
+      }, 0);
+    } else {
+      platformBakeSharePreviewStill(p);
+    }
+  }
 }
 
 function platformCloseShare() {
