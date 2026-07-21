@@ -30,7 +30,7 @@ let platformIntroTransitionIndex = -1;
 let platformIntroTransitionStart = 0;
 let platformIntroTransitionDuration = 400;
 let platformIntroTransitionSnapshot = null;
-let platformIntroTransitionSoundLeadMs = 15;
+let platformIntroTransitionSoundLeadMs = 0;
 
 let platformPosterFadeStartTime = null;
 let platformPosterFadeDuration = 320;
@@ -145,17 +145,18 @@ let platformAudioActiveSources = [];
 let platformAudioGestureBound = false;
 let platformIgnoreNextMousePress = false;
 let platformIgnoreNextTouchStarted = false;
-// Android: first triangle tap may need Web Audio on press + HTML on pointerup.
+// Android may need a pointerup/click HTML fallback for the intro select clip.
 let platformPendingIntroSelectSound = false;
 let platformIntroSelectSoundPlayed = false;
 const PLATFORM_AUDIO_MASTER_GAIN = 0.42;
-const PLATFORM_SFX_SAMPLE_V = 26;
+const PLATFORM_SFX_SAMPLE_V = 27;
 const PLATFORM_SFX_SAMPLE_URLS = {
   wrong: `sfx/fail.mp3?v=${PLATFORM_SFX_SAMPLE_V}`,
   correct: `sfx/correct.wav?v=${PLATFORM_SFX_SAMPLE_V}`,
   correct2: `sfx/correct2.wav?v=${PLATFORM_SFX_SAMPLE_V}`,
   complete: `sfx/complete.wav?v=${PLATFORM_SFX_SAMPLE_V}`,
-  select: `sfx/select.mp3?v=${PLATFORM_SFX_SAMPLE_V}`
+  // WAV starts much faster than mp3 on first HTMLAudio.play() (iPhone + Android).
+  select: `sfx/select.wav?v=${PLATFORM_SFX_SAMPLE_V}`
 };
 
 function mx(x) {
@@ -1372,32 +1373,9 @@ function platformEnsureHtmlSampleEl(sampleName) {
   platformAudioHtmlEls[sampleName] = el;
   if (sampleName === "select") {
     platformAudioSelectEl = el;
-    // Android: avoid src swap + load() racing the first triangle tap.
-    if (!platformIsAndroidDevice()) {
-      platformPrimeSelectAudioBlob(el);
-    }
+    // No blob re-prime: swapping src + load() adds first-tap latency.
   }
   return el;
-}
-
-function platformPrimeSelectAudioBlob(el) {
-  // Fully buffer select into a blob URL so the first tap plays with less delay.
-  if (!el || el.dataset.primed === "1") {
-    return;
-  }
-  fetch(PLATFORM_SFX_SAMPLE_URLS.select)
-    .then((res) => res.blob())
-    .then((blob) => {
-      let url = URL.createObjectURL(blob);
-      el.src = url;
-      el.dataset.primed = "1";
-      try {
-        el.load();
-      } catch (e) {
-        // ignore
-      }
-    })
-    .catch(() => {});
 }
 
 function platformPlayHtmlEl(el, volume = 0.55) {
@@ -1546,14 +1524,48 @@ function platformWarmUiPluckHtml() {
 }
 
 function platformPlaySelectHtml() {
-  // Same hot path as other samples — keep a dedicated entry for the intro tap.
-  return platformPlayHtmlSample("select", 0.7);
+  // Hot path for intro tap: start as fast as possible (no pause/seek on cold play).
+  if (platformAudioMuted) {
+    return false;
+  }
+  let el = platformEnsureHtmlSampleEl("select");
+  if (!el) {
+    return false;
+  }
+  platformAudioApplyPlaybackSession();
+  try {
+    el.muted = false;
+    el.volume = 0.7;
+    // Only reset when the clip already ran — pause+seek before first play
+    // adds noticeable latency on iPhone/Android.
+    if (el.ended || el.currentTime > 0.02) {
+      try {
+        el.pause();
+      } catch (e) {
+        // ignore
+      }
+      try {
+        el.currentTime = 0;
+      } catch (e) {
+        // ignore
+      }
+    }
+    let playResult = el.play();
+    if (playResult && typeof playResult.catch === "function") {
+      playResult.catch(() => {});
+    }
+    platformAudioUnlocked = true;
+    platformIntroSelectSoundPlayed = true;
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 function platformPlaySelectWebAudio() {
   let ctx = platformEnsureAudio();
   let buf = platformAudioBuffers.select;
-  if (!ctx || !buf) {
+  if (!ctx || !buf || ctx.state !== "running") {
     return false;
   }
   try {
@@ -1564,6 +1576,7 @@ function platformPlaySelectWebAudio() {
     g.gain.value = 0.72;
     src.connect(g);
     g.connect(ctx.destination);
+    // start(0) = now; avoid the +10ms delay used by other SFX.
     src.start(0);
     platformAudioUnlocked = true;
     platformIntroSelectSoundPlayed = true;
@@ -1601,62 +1614,43 @@ function platformFlushPendingIntroSelectSound() {
   if (!platformPendingIntroSelectSound || platformIntroSelectSoundPlayed) {
     return;
   }
-  platformAudioApplyPlaybackSession();
-  let el = platformEnsureHtmlSampleEl("select");
-  if (platformAudioMuted || !el) {
+  // Valid Android activation (pointerup/click/touchend) — HTML WAV can start here.
+  if (platformPlaySelectHtml()) {
     platformPendingIntroSelectSound = false;
-    return;
-  }
-  try {
-    el.muted = false;
-    el.volume = 0.7;
-    // Do not pause/seek before the first successful play on Android.
-    let playResult = el.play();
-    if (playResult && typeof playResult.then === "function") {
-      playResult
-        .then(() => {
-          platformIntroSelectSoundPlayed = true;
-          platformPendingIntroSelectSound = false;
-          platformAudioUnlocked = true;
-        })
-        .catch(() => {
-          // Keep pending so the following click can retry.
-        });
-    } else {
-      platformIntroSelectSoundPlayed = true;
-      platformPendingIntroSelectSound = false;
-    }
-  } catch (e) {
-    // keep pending for retry
   }
 }
 
 function platformPlayIntroSelectSound() {
-  // Intro triangle tap must sound inside the same gesture that starts the zoom.
+  // Play select as early as possible in the triangle-tap gesture.
   platformAudioApplyPlaybackSession();
   platformIntroSelectSoundPlayed = false;
+
   if (!platformIsAndroidDevice()) {
+    // iPhone: HTMLAudio.play() works from pointerdown; WAV is near-instant.
     platformPlaySelectHtml();
+    // Warm Web Audio in the background for later quiz SFX.
+    platformAudioUnlockWebOnly();
+    if (!platformAudioBuffers.select) {
+      platformLoadAudioSample("select");
+    }
     return;
   }
 
-  // Android Chrome blocks HTMLAudio.play() from pointerdown/touchstart.
-  // Web Audio resume()+start() usually works in that gesture; keep HTML as
-  // a pointerup/click backup if the buffer isn't ready yet.
+  // Android Chrome: HTMLAudio is blocked from pointerdown. Prefer Web Audio
+  // only once the context is actually running; otherwise arm HTML for pointerup.
   platformPendingIntroSelectSound = true;
-  // Drop the backup if nothing plays within this tap (avoid a late random click).
   setTimeout(() => {
     if (!platformIntroSelectSoundPlayed) {
       platformPendingIntroSelectSound = false;
     }
   }, 1500);
+
   let ctx = platformAudioUnlockWebOnly();
-  if (!ctx || !platformAudioBuffers.select) {
+  if (!platformAudioBuffers.select) {
     platformLoadAudioSample("select");
-    return;
   }
 
-  let tryPlay = () => {
+  let tryWeb = () => {
     if (platformIntroSelectSoundPlayed) {
       return;
     }
@@ -1665,12 +1659,12 @@ function platformPlayIntroSelectSound() {
     }
   };
 
-  if (ctx.state === "running") {
-    tryPlay();
-  } else {
-    // Start while suspended (Chrome queues it) and again after resume.
-    tryPlay();
-    ctx.resume().then(tryPlay).catch(() => {});
+  if (ctx) {
+    if (ctx.state === "running") {
+      tryWeb();
+    } else {
+      ctx.resume().then(tryWeb).catch(() => {});
+    }
   }
 }
 
@@ -2221,11 +2215,9 @@ function setup() {
   platformAudioApplyPlaybackSession();
   platformEnsureSilentMediaUnlock();
   platformPreloadAllHtmlSamples();
-  // Android first-triangle tap uses Web Audio; decode select during splash.
-  if (platformIsAndroidDevice()) {
-    platformEnsureAudio();
-    platformLoadAudioSample("select");
-  }
+  // Decode select during splash so Web Audio can start without fetch latency.
+  platformEnsureAudio();
+  platformLoadAudioSample("select");
   platformBindAudioGestureUnlock();
   platformBindViewportListeners();
   platformBindIntroCanvasPointer();
@@ -2376,6 +2368,10 @@ function platformTryIntroPressFromEvent(event) {
   return platformHandleIntroPress(pt.x, pt.y);
 }
 
+// Android: arm triangle on press; commit sound+zoom together on pointerup/click
+// (HTMLAudio only unlocks on those events — avoids zoom-then-late-sound).
+let platformAndroidIntroArm = null;
+
 function platformBindIntroCanvasPointer() {
   if (typeof document === "undefined") {
     return;
@@ -2393,40 +2389,67 @@ function platformBindIntroCanvasPointer() {
     if (platformIntroTransitionActive) {
       return;
     }
-    // Ignore secondary mouse buttons.
     if (typeof event.button === "number" && event.button !== 0) {
       return;
     }
+
+    if (platformIsAndroidDevice()) {
+      platformFinishSplashForIntroIfNeeded();
+      let pt = platformEventToCanvasXY(event);
+      platformAndroidIntroArm = platformHitTestIntroTriangle(pt.x, pt.y);
+      if (platformAndroidIntroArm) {
+        platformIgnoreNextMousePress = true;
+        platformIgnoreNextTouchStarted = true;
+        // Unlock Web Audio early; HTML select still waits for pointerup.
+        platformAudioUnlockWebOnly();
+        if (!platformAudioBuffers.select) {
+          platformLoadAudioSample("select");
+        }
+      }
+      return;
+    }
+
     let hit = platformTryIntroPressFromEvent(event);
     if (hit) {
-      // Stop p5's follow-up touchStarted + synthetic mousePressed from
-      // double-firing or eating the success as a "miss".
       platformIgnoreNextMousePress = true;
       platformIgnoreNextTouchStarted = true;
-      // On Android, do NOT preventDefault — that can suppress the click
-      // activation event needed for the HTMLAudio select fallback.
-      if (
-        !platformIsAndroidDevice() &&
-        typeof event.preventDefault === "function"
-      ) {
+      if (typeof event.preventDefault === "function") {
         event.preventDefault();
       }
     }
   };
 
   let onUp = () => {
+    if (platformIsAndroidDevice() && platformAndroidIntroArm) {
+      let arm = platformAndroidIntroArm;
+      platformAndroidIntroArm = null;
+      if (platformIntroTransitionActive) {
+        return;
+      }
+      // Sound + zoom in the same allowed activation event.
+      platformPlaySelectHtml();
+      platformAudioUnlockWebOnly();
+      platformPendingIntroSelectSound = false;
+      platformBeginIntroTransitionFromHit(arm, false);
+      return;
+    }
     platformFlushPendingIntroSelectSound();
   };
 
   cnv.addEventListener("pointerdown", onDown, { passive: false });
   cnv.addEventListener("pointerup", onUp, { passive: true });
   cnv.addEventListener("click", onUp, { passive: true });
-  // Window backup: canvas can miss up/click during the zoom handoff.
   if (typeof window !== "undefined") {
     window.addEventListener("pointerup", onUp, { passive: true });
     window.addEventListener("click", onUp, { passive: true });
   }
-  // Older WebKit paths without PointerEvent still get a native touch sample.
+  cnv.addEventListener(
+    "pointercancel",
+    () => {
+      platformAndroidIntroArm = null;
+    },
+    { passive: true }
+  );
   cnv.addEventListener(
     "touchstart",
     (event) => {
@@ -5954,6 +5977,14 @@ function platformHandleIntroPress(x, y) {
     return false;
   }
 
+  let hit = platformHitTestIntroTriangle(x, y);
+  if (!hit) {
+    return false;
+  }
+  return platformBeginIntroTransitionFromHit(hit);
+}
+
+function platformHitTestIntroTriangle(x, y) {
   // Expand triangles for easier taps on iPhone.
   let pad = ms(32);
 
@@ -5972,27 +6003,37 @@ function platformHandleIntroPress(x, y) {
     let g2 = grow(pts[2]);
 
     if (platformPointInTriangle(x, y, g0, g1, g2)) {
-      // Play select FIRST in the gesture, then start zoom slightly later so
-      // the sound attack and zoom feel locked together.
-      platformPlayIntroSelectSound();
-      platformIntroTransitionSnapshot = {
-        pts: [
-          [pts[0][0], pts[0][1]],
-          [pts[1][0], pts[1][1]],
-          [pts[2][0], pts[2][1]]
-        ],
-        cx,
-        cy,
-        startScale: platformIntroHover === i ? 1.035 : 1,
-        zoomScale: platformGetIntroZoomScale(pts, cx, cy)
+      return {
+        index: i,
+        snapshot: {
+          pts: [
+            [pts[0][0], pts[0][1]],
+            [pts[1][0], pts[1][1]],
+            [pts[2][0], pts[2][1]]
+          ],
+          cx,
+          cy,
+          startScale: platformIntroHover === i ? 1.035 : 1,
+          zoomScale: platformGetIntroZoomScale(pts, cx, cy)
+        }
       };
-      platformIntroTransitionActive = true;
-      platformIntroTransitionIndex = i;
-      platformIntroTransitionStart = millis() + platformIntroTransitionSoundLeadMs;
-      return true;
     }
   }
-  return false;
+  return null;
+}
+
+function platformBeginIntroTransitionFromHit(hit, playSound = true) {
+  if (!hit || platformIntroTransitionActive) {
+    return false;
+  }
+  if (playSound) {
+    platformPlayIntroSelectSound();
+  }
+  platformIntroTransitionSnapshot = hit.snapshot;
+  platformIntroTransitionActive = true;
+  platformIntroTransitionIndex = hit.index;
+  platformIntroTransitionStart = millis() + platformIntroTransitionSoundLeadMs;
+  return true;
 }
 
 function platformEaseInOutSine(x) {
