@@ -7860,11 +7860,14 @@ function platformLooseApplyPushDelta(
 
   let profile = platformLooseGetProfile(p.cfg);
 
-  // Android gazelle/toad: reuse last smoothed repel on 2 of 3 frames (cuts CPU).
+  // Android gazelle/toad: each piece recomputes its heavy repel every 3rd frame
+  // and reuses the last smoothed delta otherwise. Stagger the phase by index so
+  // ~1/3 of pieces recompute per frame — spreads the cost evenly instead of
+  // spiking on one frame (which reads as a periodic hitch).
   if (
     platformLooseAndroidHeavyAnimal(p) &&
     profile.hyenaStyleRepel &&
-    frameCount % 3 !== 0 &&
+    (frameCount + index) % 3 !== 0 &&
     p.looseRepelSmooth &&
     p.looseRepelSmooth[index]
   ) {
@@ -8482,11 +8485,14 @@ function platformLooseGetPieceGeo(cfg, index) {
   return pieceGeo[index] || null;
 }
 
+const PLATFORM_TOAD_FALLBACK_GEO = { minDx: -34, maxDx: 34, minDy: -34, maxDy: 34 };
+
 function platformLooseGetBoundsGeo(cfg, index) {
   let geo = platformLooseGetPieceGeo(cfg, index) || platformLooseGetGroupGeo(cfg, index);
 
   if (!geo && cfg.id === "toad") {
-    return { minDx: -34, maxDx: 34, minDy: -34, maxDy: 34 };
+    // Stable singleton so bbox corner-extent caching keys stay valid.
+    return PLATFORM_TOAD_FALLBACK_GEO;
   }
 
   return geo;
@@ -8845,6 +8851,60 @@ function platformLooseMeshPointToScreen(meshX, meshY, cfg) {
   return { x: platformLoosePtScratchA.x, y: platformLoosePtScratchA.y };
 }
 
+// Mesh-space rotated corner extents for a piece. rot is a piece's stable base
+// rotation, so nonzero results are cached; rot===0 (union/assembled bboxes)
+// resolves to the raw geo box with no trig.
+const platformLooseExtScratch = {
+  rot: 0,
+  geo: null,
+  minRx: 0,
+  maxRx: 0,
+  minRy: 0,
+  maxRy: 0
+};
+
+function platformLooseGetCornerExtents(cfg, index, geo, rot) {
+  if (rot === 0) {
+    platformLooseExtScratch.minRx = geo.minDx;
+    platformLooseExtScratch.maxRx = geo.maxDx;
+    platformLooseExtScratch.minRy = geo.minDy;
+    platformLooseExtScratch.maxRy = geo.maxDy;
+    return platformLooseExtScratch;
+  }
+
+  let cache = cfg._looseCornerExt;
+  if (!cache) {
+    cache = cfg._looseCornerExt = [];
+  }
+
+  let e = cache[index];
+  if (e && e.rot === rot && e.geo === geo) {
+    return e;
+  }
+
+  let cosR = cos(rot);
+  let sinR = sin(rot);
+  let dxs = [geo.minDx, geo.maxDx, geo.minDx, geo.maxDx];
+  let dys = [geo.minDy, geo.minDy, geo.maxDy, geo.maxDy];
+  let minRx = Infinity;
+  let maxRx = -Infinity;
+  let minRy = Infinity;
+  let maxRy = -Infinity;
+
+  for (let i = 0; i < 4; i++) {
+    let rx = dxs[i] * cosR - dys[i] * sinR;
+    let ry = dxs[i] * sinR + dys[i] * cosR;
+    if (rx < minRx) minRx = rx;
+    if (rx > maxRx) maxRx = rx;
+    if (ry < minRy) minRy = ry;
+    if (ry > maxRy) maxRy = ry;
+  }
+
+  e = { rot, geo, minRx, maxRx, minRy, maxRy };
+  cache[index] = e;
+  return e;
+}
+
 function platformLoosePieceScreenBBoxInto(
   cfg,
   offsetX,
@@ -8872,41 +8932,37 @@ function platformLoosePieceScreenBBoxInto(
     return out;
   }
 
-  let cosR = rot === 0 ? 1 : cos(rot);
-  let sinR = rot === 0 ? 0 : sin(rot);
-  let corners = [
-    platformLoosePtScratchA,
-    platformLoosePtScratchB,
-    platformLoosePtScratchC,
-    platformLoosePtScratchD
-  ];
-  let dxs = [geo.minDx, geo.maxDx, geo.minDx, geo.maxDx];
-  let dys = [geo.minDy, geo.minDy, geo.maxDy, geo.maxDy];
+  // Mesh->screen is separable-linear (screenX depends only on meshX, screenY on
+  // meshY), so the rotated corner offsets are a constant per piece. Factor them
+  // out: one base-point transform + a few multiplies instead of 4 full corner
+  // transforms with sin/cos. Bit-identical result, far cheaper on the hot path.
+  let ext = platformLooseGetCornerExtents(cfg, index, geo, rot);
 
-  for (let i = 0; i < 4; i++) {
-    let dx = dxs[i];
-    let dy = dys[i];
-    let rx = dx * cosR - dy * sinR;
-    let ry = dx * sinR + dy * cosR;
-    platformLooseMeshPointToScreenInto(
-      pivot.x + offsetX + rx,
-      pivot.y + offsetY + ry,
-      cfg,
-      corners[i]
-    );
-  }
+  platformLooseMeshPointToScreenInto(
+    pivot.x + offsetX,
+    pivot.y + offsetY,
+    cfg,
+    platformLoosePtScratchA
+  );
+  let baseSX = platformLoosePtScratchA.x;
+  let baseSY = platformLoosePtScratchA.y;
 
-  let left = corners[0].x;
-  let right = corners[0].x;
-  let top = corners[0].y;
-  let bottom = corners[0].y;
+  let dt = platformLooseGetDrawTransform(cfg);
+  let s = platformLooseRepelFrameCache
+    ? platformLooseRepelFrameCache.screenS
+    : platformW / ANIMAL_REF_W;
+  let bX = dt.scaleX * s;
+  let bY = dt.scaleY * s;
 
-  for (let i = 1; i < 4; i++) {
-    left = min(left, corners[i].x);
-    right = max(right, corners[i].x);
-    top = min(top, corners[i].y);
-    bottom = max(bottom, corners[i].y);
-  }
+  let bMin = bX * ext.minRx;
+  let bMax = bX * ext.maxRx;
+  let left = baseSX + (bMin < bMax ? bMin : bMax);
+  let right = baseSX + (bMin < bMax ? bMax : bMin);
+
+  let dMin = bY * ext.minRy;
+  let dMax = bY * ext.maxRy;
+  let top = baseSY + (dMin < dMax ? dMin : dMax);
+  let bottom = baseSY + (dMin < dMax ? dMax : dMin);
 
   let floatPad = profile.floatAmp * 0.65;
   let pad = useLoosePad
