@@ -2100,9 +2100,60 @@ function setup() {
   }
 }
 
+let platformPerfHud = null;
+let platformPerfLastTs = 0;
+let platformPerfFrameMs = 0;
+let platformPerfComputeCount = 0;
+let platformPerfComputeShown = 0;
+
+function platformPerfEnabled() {
+  if (platformPerfHud === null) {
+    platformPerfHud =
+      typeof window !== "undefined" &&
+      window.location &&
+      /[?&]perf=1/.test(window.location.search || "");
+  }
+  return platformPerfHud;
+}
+
+function platformPerfTick() {
+  let now = typeof performance !== "undefined" ? performance.now() : Date.now();
+  if (platformPerfLastTs > 0) {
+    let dt = now - platformPerfLastTs;
+    platformPerfFrameMs = platformPerfFrameMs * 0.9 + dt * 0.1;
+  }
+  platformPerfLastTs = now;
+  platformPerfComputeShown = platformPerfComputeCount;
+  platformPerfComputeCount = 0;
+}
+
+function platformDrawPerfHud() {
+  let fps = platformPerfFrameMs > 0 ? 1000 / platformPerfFrameMs : 0;
+  push();
+  resetMatrix();
+  noStroke();
+  fill(0, 0, 0, 180);
+  rect(0, 0, ms(170), ms(48));
+  fill(0, 255, 120);
+  textAlign(LEFT, TOP);
+  textStyle(NORMAL);
+  textSize(ms(13));
+  text(
+    fps.toFixed(0) + " fps  " + platformPerfFrameMs.toFixed(1) + " ms",
+    ms(6),
+    ms(5)
+  );
+  text("repel/frame: " + platformPerfComputeShown, ms(6), ms(25));
+  pop();
+}
+
 function draw() {
+  if (platformPerfEnabled()) {
+    platformPerfTick();
+  }
   if (platformMode === "splash") {
     platformDrawSplash();
+    if (platformPerfEnabled()) platformDrawPerfHud();
     return;
   }
 
@@ -2111,11 +2162,13 @@ function draw() {
     if (platformMode !== "intro" && platformMode !== "loading") {
       platformDrawPosterHandoffFrame();
     }
+    if (platformPerfEnabled()) platformDrawPerfHud();
     return;
   }
 
   if (platformMode === "loading") {
     platformDrawLoading();
+    if (platformPerfEnabled()) platformDrawPerfHud();
     return;
   }
 
@@ -2145,6 +2198,9 @@ function draw() {
     }
   } else {
     platformHideFinalDockBleed();
+  }
+  if (platformPerfEnabled()) {
+    platformDrawPerfHud();
   }
 }
 
@@ -7880,6 +7936,7 @@ function platformLooseApplyPushDelta(
   }
 
   if (p.cfg.getPieceGroup) {
+    platformPerfComputeCount++;
     let cleared = platformLooseApplyGroupedRepel(
       p,
       index,
