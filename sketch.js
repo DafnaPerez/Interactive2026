@@ -145,8 +145,11 @@ let platformAudioActiveSources = [];
 let platformAudioGestureBound = false;
 let platformIgnoreNextMousePress = false;
 let platformIgnoreNextTouchStarted = false;
+// Android Chrome: HTMLAudio.play() is blocked from pointerdown/touchstart.
+// Arm select for pointerup/click (valid activation) when Web Audio isn't ready.
+let platformPendingIntroSelectSound = false;
 const PLATFORM_AUDIO_MASTER_GAIN = 0.42;
-const PLATFORM_SFX_SAMPLE_V = 24;
+const PLATFORM_SFX_SAMPLE_V = 25;
 const PLATFORM_SFX_SAMPLE_URLS = {
   wrong: `sfx/fail.mp3?v=${PLATFORM_SFX_SAMPLE_V}`,
   correct: `sfx/correct.wav?v=${PLATFORM_SFX_SAMPLE_V}`,
@@ -1369,7 +1372,10 @@ function platformEnsureHtmlSampleEl(sampleName) {
   platformAudioHtmlEls[sampleName] = el;
   if (sampleName === "select") {
     platformAudioSelectEl = el;
-    platformPrimeSelectAudioBlob(el);
+    // Android: avoid src swap + load() racing the first triangle tap.
+    if (!platformIsAndroidDevice()) {
+      platformPrimeSelectAudioBlob(el);
+    }
   }
   return el;
 }
@@ -1404,17 +1410,20 @@ function platformPlayHtmlEl(el, volume = 0.55) {
     // correct/wrong (and select) feel late vs Android.
     el.muted = false;
     el.volume = Math.max(0, Math.min(1, volume));
-    try {
-      el.pause();
-    } catch (e) {
-      // ignore
-    }
-    try {
-      if (el.currentTime !== 0) {
-        el.currentTime = 0;
+    // Skip pause/seek on a fresh element — Android Chrome can abort the
+    // following play() if we pause before the first successful start.
+    let needsReset = !el.paused || el.ended || el.currentTime > 0.02;
+    if (needsReset) {
+      try {
+        el.pause();
+      } catch (e) {
+        // ignore
       }
-    } catch (e) {
-      // ignore
+      try {
+        el.currentTime = 0;
+      } catch (e) {
+        // ignore
+      }
     }
     let playResult = el.play();
     if (playResult && typeof playResult.catch === "function") {
@@ -1539,6 +1548,29 @@ function platformWarmUiPluckHtml() {
 function platformPlaySelectHtml() {
   // Same hot path as other samples — keep a dedicated entry for the intro tap.
   return platformPlayHtmlSample("select", 0.7);
+}
+
+function platformFlushPendingIntroSelectSound() {
+  if (!platformPendingIntroSelectSound) {
+    return;
+  }
+  platformPendingIntroSelectSound = false;
+  platformAudioApplyPlaybackSession();
+  platformKickSilentMedia();
+  platformPlaySelectHtml();
+}
+
+function platformPlayIntroSelectSound() {
+  // Intro triangle tap must sound inside the same gesture that starts the zoom.
+  platformAudioApplyPlaybackSession();
+  if (!platformIsAndroidDevice()) {
+    platformPlaySelectHtml();
+    return;
+  }
+
+  // Android Chrome rejects HTMLAudio.play() from pointerdown/touchstart
+  // (only click / pointerup / touchend count). Arm for the matching up event.
+  platformPendingIntroSelectSound = true;
 }
 
 function platformPreloadAllHtmlSamples() {
@@ -2100,60 +2132,9 @@ function setup() {
   }
 }
 
-let platformPerfHud = null;
-let platformPerfLastTs = 0;
-let platformPerfFrameMs = 0;
-let platformPerfComputeCount = 0;
-let platformPerfComputeShown = 0;
-
-function platformPerfEnabled() {
-  if (platformPerfHud === null) {
-    platformPerfHud =
-      typeof window !== "undefined" &&
-      window.location &&
-      /[?&]perf=1/.test(window.location.search || "");
-  }
-  return platformPerfHud;
-}
-
-function platformPerfTick() {
-  let now = typeof performance !== "undefined" ? performance.now() : Date.now();
-  if (platformPerfLastTs > 0) {
-    let dt = now - platformPerfLastTs;
-    platformPerfFrameMs = platformPerfFrameMs * 0.9 + dt * 0.1;
-  }
-  platformPerfLastTs = now;
-  platformPerfComputeShown = platformPerfComputeCount;
-  platformPerfComputeCount = 0;
-}
-
-function platformDrawPerfHud() {
-  let fps = platformPerfFrameMs > 0 ? 1000 / platformPerfFrameMs : 0;
-  push();
-  resetMatrix();
-  noStroke();
-  fill(0, 0, 0, 180);
-  rect(0, 0, ms(170), ms(48));
-  fill(0, 255, 120);
-  textAlign(LEFT, TOP);
-  textStyle(NORMAL);
-  textSize(ms(13));
-  text(
-    fps.toFixed(0) + " fps  " + platformPerfFrameMs.toFixed(1) + " ms",
-    ms(6),
-    ms(5)
-  );
-  text("repel/frame: " + platformPerfComputeShown, ms(6), ms(25));
-  pop();
-}
-
 function draw() {
-  if (platformPerfEnabled()) {
-    platformPerfTick();
-  }
   if (platformMode === "splash") {
     platformDrawSplash();
-    if (platformPerfEnabled()) platformDrawPerfHud();
     return;
   }
 
@@ -2162,13 +2143,11 @@ function draw() {
     if (platformMode !== "intro" && platformMode !== "loading") {
       platformDrawPosterHandoffFrame();
     }
-    if (platformPerfEnabled()) platformDrawPerfHud();
     return;
   }
 
   if (platformMode === "loading") {
     platformDrawLoading();
-    if (platformPerfEnabled()) platformDrawPerfHud();
     return;
   }
 
@@ -2198,9 +2177,6 @@ function draw() {
     }
   } else {
     platformHideFinalDockBleed();
-  }
-  if (platformPerfEnabled()) {
-    platformDrawPerfHud();
   }
 }
 
@@ -2323,7 +2299,21 @@ function platformBindIntroCanvasPointer() {
     }
   };
 
+  let onUp = () => {
+    platformFlushPendingIntroSelectSound();
+  };
+
   cnv.addEventListener("pointerdown", onDown, { passive: false });
+  cnv.addEventListener("pointerup", onUp, { passive: true });
+  // click is a valid Android activation event if pointerup was skipped.
+  cnv.addEventListener("click", onUp, { passive: true });
+  cnv.addEventListener(
+    "pointercancel",
+    () => {
+      platformPendingIntroSelectSound = false;
+    },
+    { passive: true }
+  );
   // Older WebKit paths without PointerEvent still get a native touch sample.
   cnv.addEventListener(
     "touchstart",
@@ -2334,6 +2324,16 @@ function platformBindIntroCanvasPointer() {
       onDown(event);
     },
     { passive: false }
+  );
+  cnv.addEventListener(
+    "touchend",
+    (event) => {
+      if (typeof window !== "undefined" && window.PointerEvent) {
+        return;
+      }
+      onUp(event);
+    },
+    { passive: true }
   );
 }
 
@@ -3828,15 +3828,7 @@ function platformHandleAnimalMenuPress() {
 }
 
 function platformGetSharePageUrl() {
-  try {
-    let url = new URL(PLATFORM_SHARE_PUBLIC_URL);
-    if (posterRegistry[platformMode]) {
-      url.searchParams.set("animal", platformMode);
-    }
-    return url.toString();
-  } catch (err) {
-    return PLATFORM_SHARE_PUBLIC_URL;
-  }
+  return PLATFORM_SHARE_PUBLIC_URL;
 }
 
 function platformGetShareAnimalPhrase(p) {
@@ -5870,8 +5862,7 @@ function platformHandleIntroPress(x, y) {
     if (platformPointInTriangle(x, y, g0, g1, g2)) {
       // Play select FIRST in the gesture, then start zoom slightly later so
       // the sound attack and zoom feel locked together.
-      platformAudioApplyPlaybackSession();
-      platformPlaySelectHtml();
+      platformPlayIntroSelectSound();
       platformIntroTransitionSnapshot = {
         pts: [
           [pts[0][0], pts[0][1]],
@@ -7924,7 +7915,6 @@ function platformLooseApplyPushDelta(
   // stutter; the O(n^2) union-bbox rebuild that made that necessary is now
   // cached, so per-frame compute is cheap.
   if (p.cfg.getPieceGroup) {
-    platformPerfComputeCount++;
     let cleared = platformLooseApplyGroupedRepel(
       p,
       index,
