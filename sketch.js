@@ -7920,21 +7920,10 @@ function platformLooseApplyPushDelta(
 
   let profile = platformLooseGetProfile(p.cfg);
 
-  // Android gazelle/toad: each piece recomputes its heavy repel every 3rd frame
-  // and reuses the last smoothed delta otherwise. Stagger the phase by index so
-  // ~1/3 of pieces recompute per frame — spreads the cost evenly instead of
-  // spiking on one frame (which reads as a periodic hitch).
-  if (
-    platformLooseAndroidHeavyAnimal(p) &&
-    profile.hyenaStyleRepel &&
-    (frameCount + index) % 3 !== 0 &&
-    p.looseRepelSmooth &&
-    p.looseRepelSmooth[index]
-  ) {
-    let prev = p.looseRepelSmooth[index];
-    return { x: offsetX + prev.x, y: offsetY + prev.y };
-  }
-
+  // Repel is recomputed every frame for smooth motion. It used to be throttled
+  // to every 3rd frame on Android (freezing the offset between), which read as
+  // stutter; the O(n^2) union-bbox rebuild that made that necessary is now
+  // cached, so per-frame compute is cheap.
   if (p.cfg.getPieceGroup) {
     platformPerfComputeCount++;
     let cleared = platformLooseApplyGroupedRepel(
