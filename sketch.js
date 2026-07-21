@@ -6189,6 +6189,10 @@ const platformLooseTargetCache = {};
 const platformLooseGroupBBoxCache = {};
 const platformPelobatesTargetCache = {};
 let platformLooseRepelFrameCache = null;
+// Persistent connected-group union bboxes (assembled pose), keyed by cfg+group.
+// Invalidated only when the viewport size changes.
+let platformLooseConnectedUnionCache = {};
+let platformLooseConnectedUnionCacheKey = "";
 const platformLooseLayoutVersion = 97;
 const PLATFORM_LOOSE_ROT_PAD = 24;
 const PLATFORM_LOOSE_STROKE_PAD = 3;
@@ -8591,18 +8595,18 @@ function platformLooseApplyScreenSepToMesh(cfg, pivot, offsetX, offsetY, dxScree
 function platformLooseBeginRepelFrame(p) {
   let s = platformW / ANIMAL_REF_W;
   platformLooseRepelFrameCache = {
-    key: (p.cfg.id || "poster") + "|" + p.tGroup.join(","),
-    boxes: {},
     screenS: s,
     screenAnchorY:
       platformLayoutY(ANIMAL_ANCHOR_Y) + ms(ANIMAL_SCREEN_OFFSET_Y)
   };
 
-  // Prefetch connected-group bboxes once per frame (deer/toad hot path).
-  if (platformLooseAndroidHeavyAnimal(p) && p.cfg.getPieceGroup) {
-    for (let g = 0; g < 4; g++) {
-      platformLooseGetConnectedGroupUnionBBox(p, g);
-    }
+  // Connected-group union bboxes are assembled-pose boxes (offset 0,0), so they
+  // only change when the viewport does — not per frame. Drop the persistent
+  // cache when the size changes; otherwise reuse it across the whole animation.
+  let sizeKey = platformW + "x" + platformH;
+  if (platformLooseConnectedUnionCacheKey !== sizeKey) {
+    platformLooseConnectedUnionCacheKey = sizeKey;
+    platformLooseConnectedUnionCache = {};
   }
 }
 
@@ -8656,21 +8660,16 @@ function platformLooseGetConnectedGroupUnionBBox(p, groupIndex) {
     return null;
   }
 
-  if (
-    platformLooseRepelFrameCache &&
-    platformLooseRepelFrameCache.key ===
-      (cfg.id || "poster") + "|" + p.tGroup.join(",")
-  ) {
-    if (groupIndex in platformLooseRepelFrameCache.boxes) {
-      return platformLooseRepelFrameCache.boxes[groupIndex];
-    }
+  let key = (cfg.id || "poster") + "|" + groupIndex;
+  let cached = platformLooseConnectedUnionCache[key];
 
-    let box = platformLooseBuildConnectedGroupUnionBBox(cfg, groupIndex);
-    platformLooseRepelFrameCache.boxes[groupIndex] = box;
-    return box;
+  if (cached !== undefined) {
+    return cached;
   }
 
-  return platformLooseBuildConnectedGroupUnionBBox(cfg, groupIndex);
+  let box = platformLooseBuildConnectedGroupUnionBBox(cfg, groupIndex);
+  platformLooseConnectedUnionCache[key] = box;
+  return box;
 }
 
 function platformLooseRepelFromConnectedPieces(
@@ -11118,11 +11117,14 @@ function platformClearSharedPosterCaches() {
   for (let key in platformLooseGroupBBoxCache) {
     delete platformLooseGroupBBoxCache[key];
   }
+  platformLooseConnectedUnionCache = {};
+  platformLooseConnectedUnionCacheKey = "";
   for (let id in posterRegistry) {
     let cfg = posterRegistry[id] && posterRegistry[id].cfg;
     if (cfg) {
       cfg._looseProfile = null;
       cfg._looseProfileVer = -1;
+      cfg._looseCornerExt = null;
     }
   }
 }
