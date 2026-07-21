@@ -7350,7 +7350,7 @@ function platformLooseClearLooseFromConnectedBBox(
   let pivot = profile.pivot;
   let ox = offsetX;
   let oy = offsetY;
-  let clearPasses = platformLooseAndroidHeavyAnimal(p) ? 1 : 2;
+  let clearPasses = 2;
   let scratch = platformLooseBBoxScratch;
 
   for (let pass = 0; pass < clearPasses; pass++) {
@@ -7881,12 +7881,11 @@ function platformLooseApplyGroupedRepel(
       }
     }
 
-    // Android: ComputeRepelCleared already ran ClearLoose once — skip duplicate.
-    let bboxPasses = platformLooseAndroidHeavyAnimal(p)
-      ? 0
-      : p.cfg.id === "toad"
-        ? min(6, 3 + connectedGroups)
-        : 3;
+    // Full separation passes on every platform. Under-converging here (Android
+    // used to run 0 extra passes) left pieces unresolved on the bbox edge, so
+    // each frame re-nudged them from a slightly different spot — visible jitter.
+    let bboxPasses =
+      p.cfg.id === "toad" ? min(6, 3 + connectedGroups) : 3;
 
     for (let pass = 0; pass < bboxPasses; pass++) {
       cleared = platformLooseClearLooseFromConnectedBBox(
@@ -8745,14 +8744,10 @@ function platformLooseRepelFromConnectedPieces(
 
   let ox = offsetX;
   let oy = offsetY;
-  // Android: fewer separation iters — same clearance goal via follow smoothing,
-  // avoids occasional frame spikes during connect.
   let maxIter = profile.hyenaStyleRepel
-    ? platformLooseAndroidHeavyAnimal(p)
-      ? 2
-      : platformIsAndroidDevice()
-        ? 6
-        : 10
+    ? platformIsAndroidDevice()
+      ? 6
+      : 10
     : platformIsAndroidDevice()
       ? 12
       : 32;
@@ -9433,11 +9428,6 @@ function platformGetLooseWobbleDampen(p, pieceGroup, absX, absY, pieceT, index =
   let repelMix = platformLooseRepelMix(pieceT, p);
 
   if (repelMix <= 0.001) {
-    return 1;
-  }
-
-  // Android gazelle: skip per-piece near-body distance queries (huge CPU save).
-  if (platformLooseAndroidHeavyAnimal(p)) {
     return 1;
   }
 
